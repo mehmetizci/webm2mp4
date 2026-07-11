@@ -1,6 +1,6 @@
 'use client';
 
-import { Video, Clock, Maximize2, Volume2, Film, VolumeX } from 'lucide-react';
+import { Video, Clock, Maximize2, Volume2, Film, VolumeX, FileVideo } from 'lucide-react';
 import type { VideoMetadata, MediaInfo } from '@/types/converter';
 import { formatFileSize, formatDuration } from '@/lib/file-utils';
 
@@ -12,13 +12,12 @@ interface FileDetailsProps {
 }
 
 export function FileDetails({ file, metadata, mediaInfo, previewUrl }: FileDetailsProps) {
-  // Get info from mediaInfo if metadata is not available
   const resolution = mediaInfo?.resolution || (metadata ? `${metadata.width}x${metadata.height}` : null);
   const duration = metadata?.duration || mediaInfo?.duration || null;
 
   return (
     <div className="w-full space-y-4">
-      <div className="relative w-full aspect-video bg-black rounded-[10px] overflow-hidden">
+      <div className="relative w-full aspect-video bg-slate-900 rounded-xl overflow-hidden">
         {previewUrl ? (
           <video
             src={previewUrl}
@@ -28,62 +27,73 @@ export function FileDetails({ file, metadata, mediaInfo, previewUrl }: FileDetai
             controls
           />
         ) : (
-          <div className="absolute inset-0 flex items-center justify-center bg-[#1F2937]">
-            <Film className="w-12 h-12 text-white/50" />
+          <div className="absolute inset-0 flex items-center justify-center">
+            <Film className="w-12 h-12 text-white/40" />
           </div>
         )}
       </div>
 
-      <div className="bg-[#F9FAFB] rounded-[10px] p-4 space-y-3">
+      <div className="bg-slate-50 rounded-xl p-4 space-y-4">
         <div className="flex items-start justify-between gap-4">
           <div className="flex-1 min-w-0">
-            <p className="text-[#1F2937] font-medium text-sm truncate" title={file.name}>
-              {file.name}
-            </p>
-            <p className="text-[#6B7280] text-xs mt-1">
+            <div className="flex items-center gap-2">
+              <FileVideo className="w-4 h-4 text-slate-400 shrink-0" />
+              <p className="text-slate-800 font-medium text-sm truncate" title={file.name}>
+                {file.name}
+              </p>
+            </div>
+            <p className="text-slate-500 text-xs mt-1.5 ml-6">
               {formatFileSize(file.size)}
             </p>
           </div>
         </div>
 
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-2 border-t border-[#E5E7EB]">
-          <div className="flex items-center gap-2">
-            <Clock className="w-4 h-4 text-[#9CA3AF]" />
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-3 border-t border-slate-100">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-lg bg-white flex items-center justify-center shadow-sm shrink-0">
+              <Clock className="w-4 h-4 text-slate-400" />
+            </div>
             <div>
-              <p className="text-[10px] text-[#9CA3AF]">Süre</p>
-              <p className="text-xs text-[#374151] font-medium">
+              <p className="text-[10px] text-slate-400">Süre</p>
+              <p className="text-xs text-slate-700 font-medium">
                 {duration ? formatDuration(duration) : '--'}
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
-            <Maximize2 className="w-4 h-4 text-[#9CA3AF]" />
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-lg bg-white flex items-center justify-center shadow-sm shrink-0">
+              <Maximize2 className="w-4 h-4 text-slate-400" />
+            </div>
             <div>
-              <p className="text-[10px] text-[#9CA3AF]">Çözünürlük</p>
-              <p className="text-xs text-[#374151] font-medium">
+              <p className="text-[10px] text-slate-400">Çözünürlük</p>
+              <p className="text-xs text-slate-700 font-medium">
                 {resolution || '--'}
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
-            <Video className="w-4 h-4 text-[#9CA3AF]" />
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-lg bg-white flex items-center justify-center shadow-sm shrink-0">
+              <Video className="w-4 h-4 text-slate-400" />
+            </div>
             <div>
-              <p className="text-[10px] text-[#9CA3AF]">Format</p>
-              <p className="text-xs text-[#374151] font-medium">WebM</p>
+              <p className="text-[10px] text-slate-400">Format</p>
+              <p className="text-xs text-slate-700 font-medium">WebM</p>
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
-            {mediaInfo?.hasAudio ? (
-              <Volume2 className="w-4 h-4 text-[#9CA3AF]" />
-            ) : (
-              <VolumeX className="w-4 h-4 text-[#9CA3AF]" />
-            )}
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-lg bg-white flex items-center justify-center shadow-sm shrink-0">
+              {mediaInfo?.hasAudio ? (
+                <Volume2 className="w-4 h-4 text-slate-400" />
+              ) : (
+                <VolumeX className="w-4 h-4 text-slate-400" />
+              )}
+            </div>
             <div>
-              <p className="text-[10px] text-[#9CA3AF]">Ses</p>
-              <p className="text-xs text-[#374151] font-medium">
+              <p className="text-[10px] text-slate-400">Ses</p>
+              <p className="text-xs text-slate-700 font-medium">
                 {mediaInfo?.hasAudio !== undefined 
                   ? mediaInfo.hasAudio 
                     ? `Var (${mediaInfo.audioCodec?.toUpperCase() || 'Bilinmiyor'})` 
@@ -95,13 +105,15 @@ export function FileDetails({ file, metadata, mediaInfo, previewUrl }: FileDetai
         </div>
 
         {mediaInfo && (
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-2 border-t border-[#E5E7EB]">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-3 border-t border-slate-100">
             {mediaInfo.videoCodec && (
-              <div className="flex items-center gap-2">
-                <Film className="w-4 h-4 text-[#9CA3AF]" />
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-white flex items-center justify-center shadow-sm shrink-0">
+                  <Film className="w-4 h-4 text-slate-400" />
+                </div>
                 <div>
-                  <p className="text-[10px] text-[#9CA3AF]">Codec</p>
-                  <p className="text-xs text-[#374151] font-medium">
+                  <p className="text-[10px] text-slate-400">Codec</p>
+                  <p className="text-xs text-slate-700 font-medium">
                     {mediaInfo.videoCodec.toUpperCase()}
                   </p>
                 </div>
@@ -109,11 +121,13 @@ export function FileDetails({ file, metadata, mediaInfo, previewUrl }: FileDetai
             )}
             
             {mediaInfo.frameRate && (
-              <div className="flex items-center gap-2">
-                <Film className="w-4 h-4 text-[#9CA3AF]" />
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-white flex items-center justify-center shadow-sm shrink-0">
+                  <Film className="w-4 h-4 text-slate-400" />
+                </div>
                 <div>
-                  <p className="text-[10px] text-[#9CA3AF]">FPS</p>
-                  <p className="text-xs text-[#374151] font-medium">
+                  <p className="text-[10px] text-slate-400">FPS</p>
+                  <p className="text-xs text-slate-700 font-medium">
                     {mediaInfo.frameRate.toFixed(1)}
                   </p>
                 </div>
@@ -121,11 +135,13 @@ export function FileDetails({ file, metadata, mediaInfo, previewUrl }: FileDetai
             )}
             
             {mediaInfo.bitrate && (
-              <div className="flex items-center gap-2">
-                <Video className="w-4 h-4 text-[#9CA3AF]" />
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-white flex items-center justify-center shadow-sm shrink-0">
+                  <Video className="w-4 h-4 text-slate-400" />
+                </div>
                 <div>
-                  <p className="text-[10px] text-[#9CA3AF]">Bitrate</p>
-                  <p className="text-xs text-[#374151] font-medium">
+                  <p className="text-[10px] text-slate-400">Bitrate</p>
+                  <p className="text-xs text-slate-700 font-medium">
                     {mediaInfo.bitrate} kbps
                   </p>
                 </div>
@@ -133,11 +149,13 @@ export function FileDetails({ file, metadata, mediaInfo, previewUrl }: FileDetai
             )}
             
             {mediaInfo.audioSampleRate && (
-              <div className="flex items-center gap-2">
-                <Volume2 className="w-4 h-4 text-[#9CA3AF]" />
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-white flex items-center justify-center shadow-sm shrink-0">
+                  <Volume2 className="w-4 h-4 text-slate-400" />
+                </div>
                 <div>
-                  <p className="text-[10px] text-[#9CA3AF]">Sample Rate</p>
-                  <p className="text-xs text-[#374151] font-medium">
+                  <p className="text-[10px] text-slate-400">Sample Rate</p>
+                  <p className="text-xs text-slate-700 font-medium">
                     {(mediaInfo.audioSampleRate / 1000).toFixed(1)} kHz
                   </p>
                 </div>
@@ -146,12 +164,12 @@ export function FileDetails({ file, metadata, mediaInfo, previewUrl }: FileDetai
           </div>
         )}
 
-        <div className="flex items-center gap-2 pt-2 border-t border-[#E5E7EB]">
-          <span className="inline-flex items-center px-2 py-1 rounded-full bg-[#376BFC]/10 text-[#376BFC] text-xs font-medium">
+        <div className="flex items-center gap-2 pt-3 border-t border-slate-100">
+          <span className="inline-flex items-center px-2.5 py-1 rounded-lg bg-[#376BFC]/10 text-[#376BFC] text-xs font-medium">
             WebM
           </span>
           {mediaInfo?.videoCodec && (
-            <span className="inline-flex items-center px-2 py-1 rounded-full bg-[#6B7280]/10 text-[#6B7280] text-xs font-medium">
+            <span className="inline-flex items-center px-2.5 py-1 rounded-lg bg-slate-100 text-slate-600 text-xs font-medium">
               {mediaInfo.videoCodec.toUpperCase()}
             </span>
           )}

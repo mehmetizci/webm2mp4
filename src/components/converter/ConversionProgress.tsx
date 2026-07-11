@@ -17,12 +17,11 @@ const STAGE_DESCRIPTIONS: Record<string, string> = {
 };
 
 export function ConversionProgress({ progress }: ConversionProgressProps) {
-  // If no actual progress has been received, show preparing message
   const showPreparing = !progress.hasProgress && progress.stage !== 'loading' && progress.stage !== 'complete' && progress.stage !== 'error';
-  const showTimeEstimate = progress.hasProgress || progress.time > 2; // Show time after 2 seconds even without progress
+  const showTimeEstimate = progress.hasProgress || progress.time > 2;
 
   return (
-    <div className="flex flex-col items-center justify-center w-full min-h-[280px] sm:min-h-[320px] bg-[#F9FAFB] rounded-[10px] p-6 space-y-6">
+    <div className="flex flex-col items-center justify-center w-full min-h-[280px] sm:min-h-[320px] bg-slate-50/50 rounded-2xl p-6 space-y-6">
       <div className="relative">
         <div className="w-20 h-20 rounded-full">
           <svg className="w-full h-full -rotate-90" viewBox="0 0 100 100">
@@ -31,7 +30,7 @@ export function ConversionProgress({ progress }: ConversionProgressProps) {
               cy="50"
               r="45"
               fill="none"
-              stroke="#E5E7EB"
+              stroke="#E2E8F0"
               strokeWidth="6"
             />
             <circle
@@ -53,18 +52,18 @@ export function ConversionProgress({ progress }: ConversionProgressProps) {
       </div>
 
       <div className="text-center space-y-2">
-        <p className="text-[#1F2937] font-medium text-base">
+        <p className="text-slate-800 font-medium text-base">
           {showPreparing ? 'Hazırlanıyor...' : 'Videonuz MP4 formatına dönüştürülüyor'}
         </p>
-        <p className="text-[#6B7280] text-sm">
+        <p className="text-slate-500 text-sm">
           {showPreparing ? 'Lütfen bekleyin...' : (STAGE_LABELS[progress.stage] || 'İşleniyor...')}
         </p>
         {showPreparing ? (
-          <p className="text-[#9CA3AF] text-xs">
+          <p className="text-slate-400 text-xs">
             Dönüştürme başlatılıyor...
           </p>
         ) : STAGE_DESCRIPTIONS[progress.stage] && (
-          <p className="text-[#9CA3AF] text-xs">
+          <p className="text-slate-400 text-xs">
             {STAGE_DESCRIPTIONS[progress.stage]}
           </p>
         )}
@@ -72,13 +71,13 @@ export function ConversionProgress({ progress }: ConversionProgressProps) {
 
       <div className="w-full max-w-xs space-y-3">
         <div className="flex justify-between text-sm">
-          <span className="text-[#374151] font-medium">{progress.percent.toFixed(0)}%</span>
-          <span className="text-[#6B7280]">
+          <span className="text-slate-700 font-medium">{progress.percent.toFixed(0)}%</span>
+          <span className="text-slate-500">
             {showTimeEstimate ? formatTime(progress.time) : '--'}
           </span>
         </div>
         
-        <div className="w-full h-2 bg-[#E5E7EB] rounded-full overflow-hidden">
+        <div className="w-full h-2 bg-slate-200 rounded-full overflow-hidden">
           <div
             className="h-full bg-[#376BFC] rounded-full transition-all duration-300 ease-out"
             style={{ width: `${progress.percent}%` }}
@@ -87,11 +86,11 @@ export function ConversionProgress({ progress }: ConversionProgressProps) {
       </div>
 
       <div className="space-y-1">
-        <p className="text-xs text-[#9CA3AF] text-center max-w-xs">
+        <p className="text-xs text-slate-400 text-center max-w-xs">
           Bu işlem cihazınızın performansına ve video boyutuna göre değişebilir.
         </p>
-        <p className="text-xs text-[#9CA3AF] text-center">
-          Video: H.264 | Ses: AAC
+        <p className="text-xs text-slate-400 text-center">
+          Video: H.264 • Ses: AAC
         </p>
       </div>
     </div>

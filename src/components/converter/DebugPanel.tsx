@@ -31,7 +31,7 @@ function StatusBadge({ status }: { status: string }) {
       case 'loaded':
       case 'completed':
       case 'written':
-        return { icon: CheckCircle, color: 'text-green-600 bg-green-50', label: 'Tamamlandı' };
+        return { icon: CheckCircle, color: 'text-emerald-600 bg-emerald-50', label: 'Tamamlandı' };
       case 'loading':
       case 'analyzing':
       case 'validating':
@@ -40,7 +40,7 @@ function StatusBadge({ status }: { status: string }) {
       case 'error':
         return { icon: XCircle, color: 'text-red-600 bg-red-50', label: 'Hata' };
       default:
-        return { icon: Info, color: 'text-gray-600 bg-gray-50', label: 'Bekliyor' };
+        return { icon: Info, color: 'text-slate-600 bg-slate-50', label: 'Bekliyor' };
     }
   };
 
@@ -59,9 +59,9 @@ function LogEntry({ entry }: { entry: DebugLogEntry }) {
   const getLevelIcon = () => {
     switch (entry.level) {
       case 'success':
-        return <CheckCircle className="w-3 h-3 text-green-600" />;
+        return <CheckCircle className="w-3 h-3 text-emerald-600" />;
       case 'warning':
-        return <AlertTriangle className="w-3 h-3 text-yellow-600" />;
+        return <AlertTriangle className="w-3 h-3 text-amber-600" />;
       case 'error':
         return <XCircle className="w-3 h-3 text-red-600" />;
       default:
@@ -70,14 +70,14 @@ function LogEntry({ entry }: { entry: DebugLogEntry }) {
   };
 
   return (
-    <div className={`flex items-start gap-2 py-1 border-b border-gray-100 last:border-0 ${
-      entry.level === 'error' ? 'bg-red-50 -mx-2 px-2 rounded' : ''
+    <div className={`flex items-start gap-2 py-1.5 border-b border-slate-100 last:border-0 ${
+      entry.level === 'error' ? 'bg-red-50 -mx-2 px-2 rounded-lg' : ''
     }`}>
-      <span className="text-xs text-gray-400 font-mono shrink-0">{entry.timestamp}</span>
+      <span className="text-xs text-slate-400 font-mono shrink-0">{entry.timestamp}</span>
       {getLevelIcon()}
       <div className="flex-1 min-w-0">
-        <span className="text-xs font-medium text-gray-700">[{entry.step}]</span>{' '}
-        <span className="text-xs text-gray-600 break-all">{entry.message}</span>
+        <span className="text-xs font-medium text-slate-600">[{entry.step}]</span>{' '}
+        <span className="text-xs text-slate-500 break-all">{entry.message}</span>
       </div>
     </div>
   );
@@ -86,8 +86,8 @@ function LogEntry({ entry }: { entry: DebugLogEntry }) {
 function DebugSection({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div className="space-y-2">
-      <h4 className="text-xs font-semibold text-gray-700 uppercase tracking-wider">{title}</h4>
-      <div className="bg-gray-50 rounded-lg p-3 space-y-1.5 text-xs">
+      <h4 className="text-xs font-semibold text-slate-500 uppercase tracking-wider">{title}</h4>
+      <div className="bg-slate-50 rounded-xl p-3 space-y-1.5 text-xs">
         {children}
       </div>
     </div>
@@ -97,9 +97,9 @@ function DebugSection({ title, children }: { title: string; children: React.Reac
 function DebugRow({ label, value, status }: { label: string; value: string | null; status?: string }) {
   return (
     <div className="flex items-center justify-between">
-      <span className="text-gray-600">{label}</span>
+      <span className="text-slate-500">{label}</span>
       <div className="flex items-center gap-2">
-        <span className="text-gray-900 font-mono break-all">{value ?? '-'}</span>
+        <span className="text-slate-700 font-mono break-all">{value ?? '-'}</span>
         {status && <StatusBadge status={status} />}
       </div>
     </div>
@@ -113,20 +113,20 @@ export function DebugPanel({ debugInfo, isVisible }: DebugPanelProps) {
   if (!isVisible) return null;
 
   return (
-    <div className="mt-4 border border-gray-200 rounded-lg overflow-hidden bg-white">
+    <div className="mt-5 border border-slate-200 rounded-xl overflow-hidden bg-white">
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="w-full flex items-center justify-between p-3 bg-gray-50 hover:bg-gray-100 transition-colors"
+        className="w-full flex items-center justify-between p-4 bg-slate-50 hover:bg-slate-100 transition-colors"
       >
-        <div className="flex items-center gap-2">
-          <Bug className="w-4 h-4 text-gray-600" />
-          <span className="text-sm font-medium text-gray-700">Debug Bilgileri</span>
-          <span className="text-xs text-gray-500">({debugInfo.logs.length} log)</span>
+        <div className="flex items-center gap-2.5">
+          <Bug className="w-4 h-4 text-slate-500" />
+          <span className="text-sm font-medium text-slate-700">Debug Bilgileri</span>
+          <span className="text-xs text-slate-400">({debugInfo.logs.length} log)</span>
         </div>
         {isOpen ? (
-          <ChevronUp className="w-4 h-4 text-gray-500" />
+          <ChevronUp className="w-4 h-4 text-slate-400" />
         ) : (
-          <ChevronDown className="w-4 h-4 text-gray-500" />
+          <ChevronDown className="w-4 h-4 text-slate-400" />
         )}
       </button>
 
@@ -134,7 +134,7 @@ export function DebugPanel({ debugInfo, isVisible }: DebugPanelProps) {
         <div className="p-4 space-y-4 max-h-[500px] overflow-y-auto">
           {/* Environment Info */}
           <DebugSection title="Çevre Bilgileri">
-            <div className="text-gray-600 break-all text-xs font-mono bg-gray-100 p-2 rounded">
+            <div className="text-slate-500 break-all font-mono bg-white p-2 rounded-lg border border-slate-100">
               {debugInfo.userAgent}
             </div>
           </DebugSection>
@@ -180,15 +180,15 @@ export function DebugPanel({ debugInfo, isVisible }: DebugPanelProps) {
               <div className="space-y-2">
                 <DebugRow label="Hata Kodu" value={debugInfo.errorCode} status="error" />
                 <div>
-                  <span className="text-gray-600 block mb-1">Hata Mesajı:</span>
-                  <div className="bg-red-50 text-red-700 p-2 rounded text-xs">
+                  <span className="text-slate-500 block mb-1">Hata Mesajı:</span>
+                  <div className="bg-red-50 text-red-700 p-2 rounded-lg">
                     {debugInfo.errorMessage}
                   </div>
                 </div>
                 {debugInfo.errorStack && (
                   <div>
-                    <span className="text-gray-600 block mb-1">Stack Trace:</span>
-                    <pre className="bg-red-50 text-red-700 p-2 rounded text-xs overflow-x-auto whitespace-pre-wrap break-all">
+                    <span className="text-slate-500 block mb-1">Stack Trace:</span>
+                    <pre className="bg-red-50 text-red-700 p-2 rounded-lg overflow-x-auto whitespace-pre-wrap break-all">
                       {debugInfo.errorStack}
                     </pre>
                   </div>
@@ -200,7 +200,7 @@ export function DebugPanel({ debugInfo, isVisible }: DebugPanelProps) {
           {/* Last FFmpeg Logs */}
           {debugInfo.lastLogLines.length > 0 && (
             <DebugSection title="Son FFmpeg Logları">
-              <div className="bg-gray-900 text-green-400 p-2 rounded font-mono text-xs max-h-32 overflow-y-auto">
+              <div className="bg-slate-900 text-emerald-400 p-2 rounded-lg font-mono text-xs max-h-32 overflow-y-auto">
                 {debugInfo.lastLogLines.map((line, i) => (
                   <div key={i} className="break-all">{line}</div>
                 ))}
@@ -209,22 +209,22 @@ export function DebugPanel({ debugInfo, isVisible }: DebugPanelProps) {
           )}
 
           {/* All Logs Toggle */}
-          <div className="pt-2 border-t border-gray-200">
+          <div className="pt-3 border-t border-slate-100">
             <button
               onClick={() => setShowLogs(!showLogs)}
-              className="flex items-center gap-2 text-xs text-blue-600 hover:text-blue-800"
+              className="flex items-center gap-1.5 text-xs text-[#376BFC] hover:text-[#2858E0] transition-colors"
             >
-              {showLogs ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+              {showLogs ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
               Tüm Logları {showLogs ? 'Gizle' : 'Göster'} ({debugInfo.logs.length})
             </button>
 
             {showLogs && (
-              <div className="mt-2 bg-gray-900 text-green-400 p-2 rounded font-mono text-xs max-h-48 overflow-y-auto">
+              <div className="mt-2 bg-slate-900 text-emerald-400 p-2 rounded-lg font-mono text-xs max-h-48 overflow-y-auto">
                 {debugInfo.logs.map((log, i) => (
                   <LogEntry key={i} entry={log} />
                 ))}
                 {debugInfo.logs.length === 0 && (
-                  <div className="text-gray-500 text-center py-4">Henüz log yok</div>
+                  <div className="text-slate-500 text-center py-4">Henüz log yok</div>
                 )}
               </div>
             )}

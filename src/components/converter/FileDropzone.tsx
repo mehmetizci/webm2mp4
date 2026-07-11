@@ -65,11 +65,11 @@ export function FileDropzone({ onFileSelect, disabled }: FileDropzoneProps) {
       className={`
         relative flex flex-col items-center justify-center
         w-full min-h-[280px] sm:min-h-[320px]
-        border-2 border-dashed rounded-[10px] cursor-pointer
+        border-2 border-dashed rounded-2xl cursor-pointer
         transition-all duration-200
         ${isDragging 
-          ? 'border-[#376BFC] bg-[#376BFC]/5' 
-          : 'border-[#D1D5DB] bg-[#FAFAFA] hover:border-[#376BFC]/50 hover:bg-[#376BFC]/5'
+          ? 'border-[#376BFC] bg-blue-50/50' 
+          : 'border-slate-200 bg-slate-50/50 hover:border-[#376BFC]/50 hover:bg-blue-50/30'
         }
         ${disabled ? 'opacity-50 cursor-not-allowed' : ''}
       `}
@@ -85,38 +85,39 @@ export function FileDropzone({ onFileSelect, disabled }: FileDropzoneProps) {
         className="absolute inset-0 w-full h-full opacity-0 cursor-pointer disabled:cursor-not-allowed"
       />
       
-      <div className="flex flex-col items-center gap-4 px-4 text-center">
+      <div className="flex flex-col items-center gap-5 px-4 text-center">
         <div className={`
-          w-16 h-16 rounded-full flex items-center justify-center
-          ${isDragging ? 'bg-[#376BFC]/10' : 'bg-[#F3F4F6]'}
+          w-16 h-16 rounded-2xl flex items-center justify-center
+          transition-colors duration-200
+          ${isDragging ? 'bg-[#376BFC]/10' : 'bg-white shadow-sm'}
         `}>
           <UploadCloud 
-            className={`w-8 h-8 ${isDragging ? 'text-[#376BFC]' : 'text-[#6B7280]'}`} 
+            className={`w-8 h-8 transition-colors duration-200 ${isDragging ? 'text-[#376BFC]' : 'text-slate-400'}`} 
           />
         </div>
         
-        <div className="space-y-1">
-          <p className="text-[#1F2937] font-medium text-base sm:text-lg">
+        <div className="space-y-1.5">
+          <p className="text-slate-800 font-medium text-lg">
             WebM dosyanızı buraya sürükleyin
           </p>
-          <p className="text-[#6B7280] text-sm">
+          <p className="text-slate-500 text-sm">
             veya dosya seçmek için dokunun
           </p>
         </div>
         
-        <div className="space-y-1 mt-2">
-          <p className="text-[#9CA3AF] text-xs sm:text-sm">
+        <div className="space-y-1">
+          <p className="text-slate-400 text-sm">
             Yalnızca .webm dosyaları desteklenir
           </p>
-          <p className="text-[#9CA3AF] text-xs">
+          <p className="text-slate-400 text-xs">
             Maksimum dosya boyutu cihaz kapasitesine bağlıdır
           </p>
         </div>
       </div>
 
       {error && (
-        <div className="absolute bottom-4 left-4 right-4">
-          <p className="text-red-500 text-sm text-center bg-red-50 px-4 py-2 rounded-lg">
+        <div className="absolute bottom-5 left-5 right-5">
+          <p className="text-red-500 text-sm text-center bg-red-50 px-4 py-2.5 rounded-xl border border-red-100">
             {error}
           </p>
         </div>
