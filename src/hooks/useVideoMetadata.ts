@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { VideoMetadata } from '@/types/converter';
 import { createBlobUrl, revokeBlobUrl } from '@/lib/file-utils';
 
@@ -25,6 +25,10 @@ export function useVideoMetadata(): UseVideoMetadataResult & {
     if (previewUrlRef.current) {
       revokeBlobUrl(previewUrlRef.current);
       previewUrlRef.current = null;
+    }
+    if (videoElementRef.current) {
+      videoElementRef.current.src = '';
+      videoElementRef.current = null;
     }
     metadataRef.current = null;
     errorRef.current = null;
@@ -86,39 +90,57 @@ export function useVideoMetadata(): UseVideoMetadataResult & {
 export function useVideoMetadataState(
   file: File | null
 ): UseVideoMetadataResult {
-  const metadataRef = useRef<VideoMetadata | null>(null);
+  const [state, setState] = useState<UseVideoMetadataResult>({
+    metadata: null,
+    previewUrl: null,
+    error: null,
+    isLoading: false,
+  });
+  
+  const videoRef = useRef<HTMLVideoElement | null>(null);
   const previewUrlRef = useRef<string | null>(null);
-  const errorRef = useRef<string | null>(null);
-  const isLoadingRef = useRef<boolean>(false);
 
   useEffect(() => {
     if (!file) {
+      // Cleanup
       if (previewUrlRef.current) {
         revokeBlobUrl(previewUrlRef.current);
         previewUrlRef.current = null;
       }
-      metadataRef.current = null;
-      errorRef.current = null;
-      isLoadingRef.current = false;
+      if (videoRef.current) {
+        videoRef.current.src = '';
+        videoRef.current = null;
+      }
+      setState({
+        metadata: null,
+        previewUrl: null,
+        error: null,
+        isLoading: false,
+      });
       return;
     }
 
-    isLoadingRef.current = true;
+    setState(prev => ({ ...prev, isLoading: true, error: null }));
 
     const video = document.createElement('video');
+    videoRef.current = video;
     video.preload = 'metadata';
     video.muted = true;
+    video.playsInline = true;
 
     const url = createBlobUrl(file);
     previewUrlRef.current = url;
     video.src = url;
 
     const cleanup = () => {
-      video.src = '';
+      if (videoRef.current) {
+        videoRef.current.src = '';
+        videoRef.current = null;
+      }
     };
 
     video.onloadedmetadata = () => {
-      metadataRef.current = {
+      const metadata: VideoMetadata = {
         name: file.name,
         size: file.size,
         duration: video.duration,
@@ -126,23 +148,28 @@ export function useVideoMetadataState(
         height: video.videoHeight,
         hasAudio: false,
       };
-      isLoadingRef.current = false;
+      
+      setState({
+        metadata,
+        previewUrl: url,
+        error: null,
+        isLoading: false,
+      });
       cleanup();
     };
 
     video.onerror = () => {
-      errorRef.current = 'Video dosyası okunamadı veya bozuk olabilir.';
-      isLoadingRef.current = false;
+      setState({
+        metadata: null,
+        previewUrl: null,
+        error: 'Video dosyası okunamadı veya bozuk olabilir.',
+        isLoading: false,
+      });
       cleanup();
     };
 
     return cleanup;
   }, [file]);
 
-  return {
-    metadata: metadataRef.current,
-    previewUrl: previewUrlRef.current,
-    error: errorRef.current,
-    isLoading: isLoadingRef.current,
-  };
+  return state;
 }

@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { ShieldCheck, Video, Loader2 } from 'lucide-react';
+import { ShieldCheck, Video, Loader2, AlertTriangle } from 'lucide-react';
 import { FileDropzone } from './FileDropzone';
 import { FileDetails } from './FileDetails';
 import { ConversionSettings } from './ConversionSettings';
@@ -18,7 +18,34 @@ import type {
   ConversionError as ErrorType,
 } from '@/types/converter';
 
+function checkBrowserSupport(): { supported: boolean; message?: string } {
+  // Check for required APIs
+  if (typeof window === 'undefined') {
+    return { supported: false, message: 'Tarayıcı desteklenmiyor.' };
+  }
+  
+  if (typeof Blob === 'undefined') {
+    return { supported: false, message: 'Tarayıcınız Blob API\'sini desteklemiyor.' };
+  }
+  
+  if (typeof URL === 'undefined' || typeof URL.createObjectURL === 'undefined') {
+    return { supported: false, message: 'Tarayıcınız URL API\'sini desteklemiyor.' };
+  }
+  
+  if (typeof File === 'undefined' || typeof FileReader === 'undefined') {
+    return { supported: false, message: 'Tarayıcınız File API\'sini desteklemiyor.' };
+  }
+  
+  // Check for WebAssembly support
+  if (typeof WebAssembly === 'undefined' || typeof WebAssembly.instantiate === 'undefined') {
+    return { supported: false, message: 'Tarayıcınız WebAssembly desteklemiyor. Lütfen güncel bir tarayıcı kullanın.' };
+  }
+  
+  return { supported: true };
+}
+
 export function WebmConverter() {
+  const [browserCheck, setBrowserCheck] = useState<{ supported: boolean; message?: string } | null>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [metadata, setMetadata] = useState<VideoMetadata | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -34,10 +61,17 @@ export function WebmConverter() {
     error: ffmpegError,
     loadFFmpeg, 
     convert,
+    terminate,
   } = useFfmpeg();
 
-  const { metadata: videoMetadata, previewUrl: videoPreviewUrl } = useVideoMetadataState(selectedFile);
+  const { metadata: videoMetadata, previewUrl: videoPreviewUrl, error: metadataError } = useVideoMetadataState(selectedFile);
 
+  // Browser compatibility check on mount
+  useEffect(() => {
+    setBrowserCheck(checkBrowserSupport());
+  }, []);
+
+  // Sync metadata from hook to local state
   useEffect(() => {
     if (videoMetadata) {
       setMetadata(videoMetadata);
@@ -55,13 +89,17 @@ export function WebmConverter() {
   }, []);
 
   const handleRemoveFile = useCallback(() => {
+    // Revoke preview URL if exists
+    if (previewUrl) {
+      URL.revokeObjectURL(previewUrl);
+    }
     setSelectedFile(null);
     setMetadata(null);
     setPreviewUrl(null);
     setResult(null);
     setConversionError(null);
     setStage('idle');
-  }, []);
+  }, [previewUrl]);
 
   const handleConvert = useCallback(async () => {
     if (!selectedFile) return;
@@ -75,6 +113,7 @@ export function WebmConverter() {
         await loadFFmpeg();
       }
 
+      // Check if FFmpeg loaded successfully
       if (!ffmpegLoaded) {
         throw new Error('FFmpeg yüklenemedi');
       }
@@ -83,44 +122,79 @@ export function WebmConverter() {
       setResult(convertResult);
     } catch (err) {
       console.error('Conversion failed:', err);
-      if (err instanceof Error && err.message.includes('FFmpeg')) {
-        setConversionError({
-          code: 'FFMPEG_ERROR',
-          message: 'Dönüştürücü hazırlanamadı. Lütfen sayfayı yenileyip tekrar deneyin.',
-        });
-      }
+      // Error is already set by the hook
     }
   }, [selectedFile, ffmpegLoaded, loadFFmpeg, convert, settings.quality]);
 
   const handleRetry = useCallback(() => {
+    // Terminate existing FFmpeg to clean state
+    terminate();
     setConversionError(null);
-    if (selectedFile) {
-      handleConvert();
-    }
-  }, [selectedFile, handleConvert]);
+    setStage('idle');
+    // Small delay before retry
+    setTimeout(() => {
+      if (selectedFile) {
+        handleConvert();
+      }
+    }, 100);
+  }, [selectedFile, handleConvert, terminate]);
 
   const handleReset = useCallback(() => {
+    // Terminate FFmpeg to clean up
+    terminate();
+    
+    // Revoke preview URL if exists
+    if (previewUrl) {
+      URL.revokeObjectURL(previewUrl);
+    }
+    
+    // Revoke result blob URL if exists
+    if (result?.blob) {
+      // The blob is created fresh each time, no URL to revoke
+    }
+    
     setSelectedFile(null);
     setMetadata(null);
     setPreviewUrl(null);
     setResult(null);
     setConversionError(null);
     setStage('idle');
-  }, []);
+  }, [previewUrl, result, terminate]);
 
+  // Cleanup on unmount
   useEffect(() => {
     return () => {
+      terminate();
       if (previewUrl) {
         URL.revokeObjectURL(previewUrl);
       }
     };
-  }, [previewUrl]);
+  }, [terminate, previewUrl]);
+
+  // Show browser not supported message
+  if (browserCheck && !browserCheck.supported) {
+    return (
+      <div className="w-full max-w-[720px] mx-auto px-4 py-8 space-y-6">
+        <div className="bg-red-50 rounded-[10px] p-6 space-y-4 text-center">
+          <div className="w-16 h-16 mx-auto rounded-full bg-red-100 flex items-center justify-center">
+            <AlertTriangle className="w-8 h-8 text-red-500" />
+          </div>
+          <h2 className="text-xl font-semibold text-red-800">Tarayıcı Desteklenmiyor</h2>
+          <p className="text-red-600">{browserCheck.message}</p>
+          <p className="text-sm text-red-500">
+            Lütfen Chrome, Firefox, Edge veya Safari'nin güncel bir sürümünü kullanın.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   const showDropzone = !selectedFile && stage === 'idle';
   const showFileDetails = selectedFile && metadata && stage === 'idle';
   const showProgress = stage !== 'idle' && stage !== 'complete' && !conversionError;
   const showResult = result && stage === 'complete';
   const showError = conversionError && stage === 'error';
+  const showMetadataError = metadataError && !conversionError;
 
   return (
     <div className="w-full max-w-[720px] mx-auto px-4 py-8 space-y-6">
@@ -186,6 +260,18 @@ export function WebmConverter() {
 
         {showError && (
           <ConversionError error={conversionError} onRetry={handleRetry} />
+        )}
+
+        {showMetadataError && (
+          <div className="bg-red-50 rounded-[10px] p-4 text-center">
+            <p className="text-red-600 text-sm">{metadataError}</p>
+            <button
+              onClick={handleRemoveFile}
+              className="mt-2 text-sm text-red-500 hover:text-red-700 underline"
+            >
+              Farklı bir dosya seçin
+            </button>
+          </div>
         )}
       </div>
 
