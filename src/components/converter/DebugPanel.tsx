@@ -162,49 +162,59 @@ export function DebugPanel({ debugInfo, isVisible }: DebugPanelProps) {
 
           {/* WebCodecs Capabilities */}
           <DebugSection title="WebCodecs Yetenekleri">
-            <DebugRow 
-              label="Secure Context" 
-              value={debugInfo.webCodecsSecureContext === true ? 'Evet' : debugInfo.webCodecsSecureContext === false ? 'Hayır' : 'Bilinmiyor'} 
-              status={debugInfo.webCodecsSecureContext === true ? 'completed' : debugInfo.webCodecsSecureContext === false ? 'error' : undefined}
-            />
-            <DebugRow 
-              label="VideoEncoder" 
-              value={debugInfo.webCodecsVideoEncoder === true ? 'Mevcut' : debugInfo.webCodecsVideoEncoder === false ? 'Yok' : 'Bilinmiyor'} 
-              status={debugInfo.webCodecsVideoEncoder === true ? 'completed' : debugInfo.webCodecsVideoEncoder === false ? 'error' : undefined}
-            />
-            <DebugRow 
-              label="VideoDecoder" 
-              value={debugInfo.webCodecsVideoDecoder === true ? 'Mevcut' : debugInfo.webCodecsVideoDecoder === false ? 'Yok' : 'Bilinmiyor'} 
-              status={debugInfo.webCodecsVideoDecoder === true ? 'completed' : debugInfo.webCodecsVideoDecoder === false ? 'error' : undefined}
-            />
-            <DebugRow 
-              label="VideoFrame" 
-              value={debugInfo.webCodecsVideoFrame === true ? 'Mevcut' : debugInfo.webCodecsVideoFrame === false ? 'Yok' : 'Bilinmiyor'} 
-              status={debugInfo.webCodecsVideoFrame === true ? 'completed' : debugInfo.webCodecsVideoFrame === false ? 'error' : undefined}
-            />
-            <DebugRow 
-              label="H.264 Encoder" 
-              value={debugInfo.webCodecsH264Supported === true ? 'Destekleniyor' : debugInfo.webCodecsH264Supported === false ? 'Desteklenmiyor' : 'Bilinmiyor'} 
-              status={debugInfo.webCodecsH264Supported === true ? 'completed' : debugInfo.webCodecsH264Supported === false ? 'error' : undefined}
-            />
-            {debugInfo.webCodecsTestedCodec && (
+            {debugInfo.webCodecsSecureContext === null ? (
               <DebugRow 
-                label="Test Edilen Codec" 
-                value={debugInfo.webCodecsTestedCodec} 
+                label="Durum" 
+                value="Test ediliyor..." 
+                status="idle"
               />
-            )}
-            {debugInfo.webCodecsHardwareAcceleration && (
-              <DebugRow 
-                label="Hardware Acceleration" 
-                value={debugInfo.webCodecsHardwareAcceleration} 
-              />
-            )}
-            {debugInfo.webCodecsFailureDetails && (
-              <DebugRow 
-                label="Hata Detayı" 
-                value={debugInfo.webCodecsFailureDetails} 
-                status="error"
-              />
+            ) : (
+              <>
+                <DebugRow 
+                  label="Secure Context" 
+                  value={debugInfo.webCodecsSecureContext ? 'Evet' : 'Hayır'} 
+                  status={debugInfo.webCodecsSecureContext ? 'completed' : 'error'}
+                />
+                <DebugRow 
+                  label="VideoEncoder" 
+                  value={debugInfo.webCodecsVideoEncoder ? 'Mevcut' : 'Yok'} 
+                  status={debugInfo.webCodecsVideoEncoder ? 'completed' : 'error'}
+                />
+                <DebugRow 
+                  label="VideoDecoder" 
+                  value={debugInfo.webCodecsVideoDecoder ? 'Mevcut' : 'Yok'} 
+                  status={debugInfo.webCodecsVideoDecoder ? 'completed' : 'error'}
+                />
+                <DebugRow 
+                  label="VideoFrame" 
+                  value={debugInfo.webCodecsVideoFrame ? 'Mevcut' : 'Yok'} 
+                  status={debugInfo.webCodecsVideoFrame ? 'completed' : 'error'}
+                />
+                <DebugRow 
+                  label="H.264 Encoder" 
+                  value={debugInfo.webCodecsH264Supported ? 'Destekleniyor' : 'Desteklenmiyor'} 
+                  status={debugInfo.webCodecsH264Supported ? 'completed' : 'error'}
+                />
+                {debugInfo.webCodecsTestedCodec && (
+                  <DebugRow 
+                    label="Test Edilen Codec" 
+                    value={debugInfo.webCodecsTestedCodec} 
+                  />
+                )}
+                {debugInfo.webCodecsHardwareAcceleration && (
+                  <DebugRow 
+                    label="Hardware Acceleration" 
+                    value={debugInfo.webCodecsHardwareAcceleration} 
+                  />
+                )}
+                {debugInfo.webCodecsFailureDetails && (
+                  <DebugRow 
+                    label="Hata Detayı" 
+                    value={debugInfo.webCodecsFailureDetails} 
+                    status="error"
+                  />
+                )}
+              </>
             )}
           </DebugSection>
 
