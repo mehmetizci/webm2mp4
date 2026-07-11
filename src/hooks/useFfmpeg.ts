@@ -15,7 +15,12 @@ import { getOutputFileName } from '@/lib/file-utils';
 const INPUT_FILE = 'input.webm';
 const ANALYZE_FILE = 'analyze.webm';
 const OUTPUT_FILE = 'output.mp4';
-const PROGRESS_TIMEOUT_MS = 30000; // 30 seconds timeout for progress events
+
+// Timeout values
+const MOBILE_EXEC_TIMEOUT_MS = 180000; // 180 seconds for mobile
+const DESKTOP_EXEC_TIMEOUT_MS = 300000; // 300 seconds for desktop
+const STALL_TIMEOUT_MS = 90000; // 90 seconds stall detection
+const PROGRESS_ACTIVITY_TIMEOUT_MS = 60000; // 60 seconds - consider stalled if no activity
 
 interface EncoderValidation {
   h264: boolean;
@@ -43,6 +48,29 @@ interface UseFfmpegReturn {
   terminate: () => void;
 }
 
+// Check if device is mobile
+function isMobileDevice(): boolean {
+  if (typeof navigator === 'undefined') return false;
+  const userAgent = navigator.userAgent.toLowerCase();
+  return /android|webos|iphone|ipad|ipod|blackberry|iemobile|opera mini/i.test(userAgent);
+}
+
+// Get device memory (in GB)
+function getDeviceMemory(): number | null {
+  if (typeof navigator !== 'undefined' && 'deviceMemory' in navigator) {
+    return (navigator as { deviceMemory?: number }).deviceMemory || null;
+  }
+  return null;
+}
+
+// Get CPU cores
+function getCPUCores(): number {
+  if (typeof navigator !== 'undefined' && 'hardwareConcurrency' in navigator) {
+    return navigator.hardwareConcurrency || 4;
+  }
+  return 4;
+}
+
 export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
   const ffmpegRef = useRef<FFmpeg | null>(null);
   const fileDataRef = useRef<Uint8Array | null>(null);
@@ -50,6 +78,9 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
   const logHandlerRef = useRef<((data: { message: string }) => void) | null>(null);
   const progressHandlerRef = useRef<((data: { progress: number }) => void) | null>(null);
   const progressTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const stallTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastActivityRef = useRef<number>(Date.now());
+  const ffmpegLogHandlerRef = useRef<((data: { message: string }) => void) | null>(null);
   
   const [isLoaded, setIsLoaded] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -57,11 +88,11 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
     percent: 0,
     time: 0,
     stage: 'idle',
-    hasProgress: false, // Track if progress has started
+    hasProgress: false,
   });
   const [error, setError] = useState<ConversionError | null>(null);
 
-  const startTimeRef = useRef<number>(Date.now()); // Initialize immediately
+  const startTimeRef = useRef<number>(Date.now());
 
   const { addLog, updateDebugInfo } = debugCallbacks || {};
 
@@ -73,31 +104,23 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
     return { message: String(err), stack: null };
   };
 
-  // Safely normalize FFmpeg progress value (can be time, ratio, or invalid)
+  // Safely normalize FFmpeg progress value
   const normalizeProgress = (rawProgress: unknown): number => {
     const p = typeof rawProgress === 'number' ? rawProgress : 0;
-    
-    // If progress is a time value (large number like 30000), ignore it
-    // If progress is negative or invalid, ignore it
-    // If progress is > 1 (but not a time), treat as ratio
-    if (p < 0 || !isFinite(p)) {
-      return -1; // Invalid
-    }
-    
-    // If it's a very large number, it's likely a time value in seconds
-    // We can't use time directly without knowing total duration
-    if (p > 1) {
-      return -1; // Treat as invalid, don't update progress
-    }
-    
-    // Progress should be between 0 and 1
+    if (p < 0 || !isFinite(p)) return -1;
+    if (p > 1) return -1; // Treat as invalid
     return Math.max(0, Math.min(1, p));
   };
 
-  const clearProgressTimeout = useCallback(() => {
+  // Clear all timeouts
+  const clearAllTimeouts = useCallback(() => {
     if (progressTimeoutRef.current) {
       clearTimeout(progressTimeoutRef.current);
       progressTimeoutRef.current = null;
+    }
+    if (stallTimeoutRef.current) {
+      clearTimeout(stallTimeoutRef.current);
+      stallTimeoutRef.current = null;
     }
   }, []);
 
@@ -109,7 +132,6 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
       stage,
       hasProgress,
     });
-    console.log('[Progress] Stage:', stage, '| Percent:', percent, '| Time:', elapsed.toFixed(1) + 's');
   }, []);
 
   const cleanupFFmpegFiles = useCallback(async (ffmpeg: FFmpeg, fileName: string) => {
@@ -127,17 +149,13 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
   }, [cleanupFFmpegFiles]);
 
   const checkEncoders = useCallback(async (ffmpeg: FFmpeg): Promise<EncoderValidation> => {
-    const validation: EncoderValidation = {
-      h264: false,
-      aac: false,
-    };
+    const validation: EncoderValidation = { h264: false, aac: false };
 
     return new Promise((resolve) => {
       const logs: string[] = [];
       
       const handler = ({ message }: { message: string }) => {
         logs.push(message);
-        
         if (message.includes('libx264')) validation.h264 = true;
         if (message.includes('aac')) validation.aac = true;
       };
@@ -148,11 +166,6 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
       ffmpeg.exec(['-encoders']).then(() => {
         ffmpeg.off('log', handler);
         logHandlerRef.current = null;
-        
-        if (process.env.NODE_ENV === 'development') {
-          console.log('[FFmpeg] Encoder validation:', validation);
-        }
-        
         resolve(validation);
       }).catch(() => {
         ffmpeg.off('log', handler);
@@ -198,19 +211,13 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
         };
         
         const videoMatch = fullLog.match(/Video:\s*(\w+)/);
-        if (videoMatch) {
-          info.videoCodec = videoMatch[1];
-        }
+        if (videoMatch) info.videoCodec = videoMatch[1];
         
         const dimsMatch = fullLog.match(/(\d+)x(\d+)/);
-        if (dimsMatch) {
-          info.resolution = `${dimsMatch[1]}x${dimsMatch[2]}`;
-        }
+        if (dimsMatch) info.resolution = `${dimsMatch[1]}x${dimsMatch[2]}`;
         
         const fpsMatch = fullLog.match(/(\d+(?:\.\d+)?)\s*fps/);
-        if (fpsMatch) {
-          info.frameRate = parseFloat(fpsMatch[1]);
-        }
+        if (fpsMatch) info.frameRate = parseFloat(fpsMatch[1]);
         
         const durationMatch = fullLog.match(/Duration:\s*(\d+):(\d+):(\d+)\.(\d+)/);
         if (durationMatch) {
@@ -222,9 +229,7 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
         }
         
         const bitrateMatch = fullLog.match(/bitrate:\s*(\d+)\s*kb/);
-        if (bitrateMatch) {
-          info.bitrate = parseInt(bitrateMatch[1]);
-        }
+        if (bitrateMatch) info.bitrate = parseInt(bitrateMatch[1]);
         
         const audioMatch = fullLog.match(/Audio:\s*(\w+)[^\r\n]*/);
         if (audioMatch) {
@@ -232,18 +237,10 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
           info.audioCodec = audioMatch[1];
           
           const audioBitrateMatch = audioMatch[0].match(/(\d+)\s*kb/);
-          if (audioBitrateMatch) {
-            info.audioBitrate = parseInt(audioBitrateMatch[1]);
-          }
+          if (audioBitrateMatch) info.audioBitrate = parseInt(audioBitrateMatch[1]);
           
           const sampleRateMatch = audioMatch[0].match(/(\d+)\s*Hz/);
-          if (sampleRateMatch) {
-            info.audioSampleRate = parseInt(sampleRateMatch[1]);
-          }
-        }
-        
-        if (process.env.NODE_ENV === 'development') {
-          console.log('[FFmpeg] Media info parsed:', info);
+          if (sampleRateMatch) info.audioSampleRate = parseInt(sampleRateMatch[1]);
         }
         
         resolve(info);
@@ -269,16 +266,13 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
   }, []);
 
   const loadFFmpeg = useCallback(async (): Promise<boolean> => {
-    // Already loaded
     if (ffmpegRef.current) {
-      addLog?.('info', 'Load', 'FFmpeg zaten yüklü (ffmpegRef mevcut)');
+      addLog?.('info', 'Load', 'FFmpeg zaten yüklü');
       return true;
     }
     
-    // Already loading
     if (isLoading) {
       addLog?.('info', 'Load', 'FFmpeg zaten yükleniyor...');
-      // Wait for existing load to complete
       while (isLoading) {
         await new Promise(resolve => setTimeout(resolve, 100));
       }
@@ -291,18 +285,20 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
     updateDebugInfo?.({ ffmpegLoadStatus: 'loading' });
 
     const loadTimeout = setTimeout(() => {
-      console.log('[FFmpeg] Load timeout - showing loading message');
       addLog?.('warning', 'Load', 'FFmpeg yükleme 10 saniyeyi aştı');
     }, 10000);
 
     try {
       const ffmpeg = new FFmpeg();
-      console.log('[FFmpeg] FFmpeg load started');
       addLog?.('info', 'Load', 'FFmpeg başlatılıyor');
 
-      ffmpeg.on('log', ({ message }) => {
+      // Set up log handler to capture FFmpeg logs
+      ffmpegLogHandlerRef.current = ({ message }: { message: string }) => {
         console.log('[FFmpeg]', message);
-      });
+        // Pass FFmpeg raw logs to debug panel
+        addLog?.('info', 'FFmpeg', message);
+      };
+      ffmpeg.on('log', ffmpegLogHandlerRef.current);
 
       updateDebugInfo?.({ coreJsLoadStatus: 'loading', wasmLoadStatus: 'loading' });
       addLog?.('info', 'Load', 'Core JS yükleniyor: /ffmpeg/ffmpeg-core.js');
@@ -315,14 +311,12 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
       updateDebugInfo?.({ coreJsLoadStatus: 'loaded', wasmLoadStatus: 'loaded' });
       addLog?.('success', 'Load', 'Core JS yüklendi');
       addLog?.('success', 'Load', 'WASM yüklendi');
-      console.log('[FFmpeg] FFmpeg load completed');
 
       ffmpegRef.current = ffmpeg;
 
       updateDebugInfo?.({ encoderValidationStatus: 'validating' });
       addLog?.('info', 'Load', 'Encoder doğrulama başlatılıyor');
       const validation = await checkEncoders(ffmpeg);
-      console.log('[FFmpeg] Encoder check completed - H.264:', validation.h264, '| AAC:', validation.aac);
       
       encoderValidationRef.current = validation;
       updateDebugInfo?.({ 
@@ -333,20 +327,18 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
       addLog?.('success', 'Load', `Encoder doğrulama tamamlandı: H.264=${validation.h264}, AAC=${validation.aac}`);
 
       if (!validation.h264) {
-        console.error('[FFmpeg] H.264 encoder not found');
         addLog?.('error', 'Load', 'H.264 encoder bulunamadı');
         throw new Error('H264_NOT_FOUND');
       }
 
       setIsLoaded(true);
       updateProgress(0, 'idle', false);
-      addLog?.('success', 'Load', 'FFmpeg hazır - başarıyla yüklendi');
+      addLog?.('success', 'Load', 'FFmpeg hazır');
       return true;
     } catch (err) {
-      console.error('[FFmpeg] Load error:', err);
       const { message, stack } = normalizeError(err);
       
-      addLog?.('error', 'Load', `LOAD_FAILED: ${message}`, { stack, originalError: err });
+      addLog?.('error', 'Load', `LOAD_FAILED: ${message}`);
       updateDebugInfo?.({ 
         ffmpegLoadStatus: 'error',
         errorCode: 'FFMPEG_LOAD_ERROR',
@@ -361,7 +353,7 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
         errorMessage = 'Bu tarayıcıda gerekli H.264 dönüştürücü yüklenemedi. Lütfen sayfayı yenileyerek tekrar deneyin.';
         errorCode = 'H264_NOT_FOUND';
       } else if (message.includes('fetch') || message.includes('network') || message.includes('Failed to') || message.includes('404')) {
-        errorMessage = 'FFmpeg dosyaları yüklenemedi. Lütfen internet bağlantınızı kontrol edin ve sayfayı yenileyin.';
+        errorMessage = 'FFmpeg dosyaları yüklenemedi. Lütfen internet bağlantınızı kontrol edin.';
         errorCode = 'FFMPEG_FETCH_ERROR';
       } else if (message.includes('WASM') || message.includes('wasm')) {
         errorMessage = 'WebAssembly yüklenemedi. Lütfen sayfayı yenileyin.';
@@ -375,7 +367,6 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
       };
       setError(errorObj);
       updateProgress(0, 'error', false);
-      addLog?.('error', 'Load', `LOAD_FAILED: FFmpeg yüklenemedi - ${message}`);
       return false;
     } finally {
       clearTimeout(loadTimeout);
@@ -392,9 +383,7 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
     try {
       const fileData = new Uint8Array(await file.arrayBuffer());
       await ffmpeg.writeFile(ANALYZE_FILE, fileData);
-
       const mediaInfo = await parseMediaInfo(ffmpeg, file, ANALYZE_FILE);
-
       return mediaInfo;
     } finally {
       await cleanupFFmpegFiles(ffmpeg, ANALYZE_FILE);
@@ -409,11 +398,8 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
   ): Promise<ConversionResult> => {
     const ffmpeg = ffmpegRef.current;
     if (!ffmpeg) {
-      const err = new Error('FFmpeg henüz yüklenmedi - ffmpegRef.current is null');
-      addLog?.('error', 'Convert', `HATA: FFmpeg nesnesi mevcut değil`, { 
-        stack: err.stack,
-        details: 'ffmpegRef.current is null - FFmpeg load() was not called or failed'
-      });
+      const err = new Error('FFmpeg henüz yüklenmedi');
+      addLog?.('error', 'Convert', `HATA: FFmpeg nesnesi mevcut değil`);
       updateDebugInfo?.({ 
         errorMessage: 'FFmpeg nesnesi mevcut değil',
         errorStack: err.stack 
@@ -421,7 +407,7 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
       const errorObj: ConversionError = {
         code: 'FFMPEG_NOT_LOADED',
         message: 'FFmpeg henüz yüklenmedi.',
-        technical: `ffmpegRef.current is null\n${err.stack || ''}`,
+        technical: `ffmpegRef.current is null`,
       };
       setError(errorObj);
       onStageChange?.('error');
@@ -430,11 +416,8 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
 
     const validation = encoderValidationRef.current;
     if (!validation) {
-      const err = new Error('Encoder doğrulaması yapılmadı - encoderValidationRef.current is null');
-      addLog?.('error', 'Convert', `HATA: Encoder doğrulaması yapılmadı`, { 
-        stack: err.stack,
-        details: 'encoderValidationRef.current is null - encoders were not checked'
-      });
+      const err = new Error('Encoder doğrulaması yapılmadı');
+      addLog?.('error', 'Convert', `HATA: Encoder doğrulaması yapılmadı`);
       updateDebugInfo?.({ 
         errorMessage: 'Encoder doğrulaması yapılmadı',
         errorStack: err.stack 
@@ -442,7 +425,7 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
       const errorObj: ConversionError = {
         code: 'ENCODER_NOT_VALIDATED',
         message: 'Dönüştürücü hazır değil.',
-        technical: `encoderValidationRef.current is null\n${err.stack || ''}`,
+        technical: `encoderValidationRef.current is null`,
       };
       setError(errorObj);
       onStageChange?.('error');
@@ -450,11 +433,8 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
     }
 
     if (!validation.h264) {
-      const err = new Error('H.264 encoder mevcut değil - validation.h264 = false');
-      addLog?.('error', 'Convert', `HATA: H.264 encoder mevcut değil`, { 
-        stack: err.stack,
-        details: { validation }
-      });
+      const err = new Error('H.264 encoder mevcut değil');
+      addLog?.('error', 'Convert', `HATA: H.264 encoder mevcut değil`);
       updateDebugInfo?.({ 
         errorMessage: 'H.264 encoder mevcut değil',
         errorStack: err.stack 
@@ -462,18 +442,26 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
       const errorObj: ConversionError = {
         code: 'H264_ENCODER_UNAVAILABLE',
         message: 'Bu tarayıcıda gerekli H.264 dönüştürücü yüklenemedi. Lütfen sayfayı yenileyerek tekrar deneyin.',
-        technical: `H.264 encoder not found in FFmpeg\nvalidation.h264 = ${validation.h264}\nvalidation.aac = ${validation.aac}\n${err.stack || ''}`,
+        technical: `H.264 encoder not found\nvalidation.h264 = ${validation.h264}`,
       };
       setError(errorObj);
       onStageChange?.('error');
       throw err;
     }
 
-    // Initialize start time and clear any previous timeout
+    // Initialize
     startTimeRef.current = Date.now();
-    clearProgressTimeout();
+    clearAllTimeouts();
     setError(null);
-    updateDebugInfo?.({ fileWriteStatus: 'idle', ffmpegExecStartTime: null, lastProgressValue: null });
+    updateDebugInfo?.({ 
+      fileWriteStatus: 'idle', 
+      ffmpegExecStatus: 'idle',
+      ffmpegExecStartTime: null, 
+      lastProgressValue: null,
+      errorCode: null,
+      errorMessage: null,
+      errorStack: null,
+    });
 
     const crfMap: Record<QualityPreset, number> = {
       high: 18,
@@ -482,10 +470,18 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
     };
     const crf = crfMap[quality];
 
-    // Flag to track if we've received first progress event
-    let hasReceivedProgress = false;
+    // Log device info
+    const deviceMemory = getDeviceMemory();
+    const cpuCores = getCPUCores();
+    const mobile = isMobileDevice();
+    addLog?.('info', 'Convert', `Cihaz bilgisi: Hafıza=${deviceMemory || 'bilinmiyor'}GB, Çekirdek=${cpuCores}, Mobil=${mobile}`);
+    addLog?.('info', 'Convert', `Video: ${mediaInfo.resolution || 'bilinmiyor'}, Süre=${mediaInfo.duration?.toFixed(1) || 'bilinmiyor'}sn, Kalite=${quality} (CRF=${crf})`);
 
-    // Step 1: Read file into memory
+    // Flag to track activity
+    let hasReceivedProgress = false;
+    let hasReceivedFFmpegActivity = false;
+
+    // Step 1: Read file
     onStageChange?.('reading');
     updateProgress(0, 'reading', false);
     addLog?.('info', 'Convert', 'Dosya okunuyor...');
@@ -497,7 +493,7 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
       updateDebugInfo?.({ fileSize: fileData.byteLength });
     } catch (err) {
       const { message, stack } = normalizeError(err);
-      addLog?.('error', 'Convert', `FILE_READ_FAILED: ${message}`, { stack, originalError: err });
+      addLog?.('error', 'Convert', `FILE_READ_FAILED: ${message}`);
       updateDebugInfo?.({ 
         errorMessage: `Dosya okunamadı: ${message}`, 
         errorStack: stack 
@@ -505,11 +501,11 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
       const errorObj: ConversionError = {
         code: 'FILE_READ_ERROR',
         message: 'Video dosyası okunamadı.',
-        technical: `file.arrayBuffer() başarısız\n${message}\nStack: ${stack || 'yok'}`,
+        technical: `file.arrayBuffer() başarısız\n${message}`,
       };
       setError(errorObj);
       onStageChange?.('error');
-      throw err; // Re-throw ORIGINAL error
+      throw err;
     }
 
     // Step 2: Write file to FFmpeg VFS
@@ -524,11 +520,7 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
     } catch (err) {
       const { message, stack } = normalizeError(err);
       updateDebugInfo?.({ fileWriteStatus: 'error' });
-      addLog?.('error', 'Convert', `WRITE_FILE_FAILED: ${message}`, { 
-        stack,
-        originalError: err,
-        details: { fileName: INPUT_FILE, dataLength: fileData.byteLength }
-      });
+      addLog?.('error', 'Convert', `WRITE_FILE_FAILED: ${message}`);
       updateDebugInfo?.({ 
         errorMessage: `Dosya FFmpeg VFS'ye yazılamadı: ${message}`, 
         errorStack: stack 
@@ -536,17 +528,16 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
       const errorObj: ConversionError = {
         code: 'WRITE_FILE_ERROR',
         message: 'Dosya FFmpeg VFS\'ye yazılamadı.',
-        technical: `ffmpeg.writeFile("${INPUT_FILE}", ${fileData.byteLength} bytes) başarısız\n${message}\nFile: ${INPUT_FILE}\nSize: ${fileData.byteLength} bytes\nStack: ${stack || 'yok'}`,
+        technical: `ffmpeg.writeFile("${INPUT_FILE}", ${fileData.byteLength} bytes) başarısız\n${message}`,
       };
       setError(errorObj);
       onStageChange?.('error');
-      throw err; // Re-throw ORIGINAL error with full context
+      throw err;
     }
 
-    // Step 3: Use provided mediaInfo (analysis already done by parent component)
     const parsedMediaInfo = mediaInfo;
     if (!parsedMediaInfo) {
-      const err = new Error('Medya bilgisi bulunamadı - lütfen dosyayı tekrar seçin');
+      const err = new Error('Medya bilgisi bulunamadı');
       addLog?.('error', 'Convert', `MEDIA_INFO_MISSING: ${err.message}`);
       updateDebugInfo?.({ 
         errorMessage: err.message, 
@@ -555,20 +546,16 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
       const errorObj: ConversionError = {
         code: 'MEDIA_INFO_MISSING',
         message: err.message,
-        technical: `mediaInfo is null - analysis was not completed before convert()`,
+        technical: `mediaInfo is null`,
       };
       setError(errorObj);
       onStageChange?.('error');
       throw err;
     }
-    addLog?.('info', 'Convert', `Medya bilgisi kullanılıyor: ${parsedMediaInfo.resolution || 'bilinmiyor'}, sesli: ${parsedMediaInfo.hasAudio}`);
 
     if (parsedMediaInfo.hasAudio && !validation.aac) {
       const err = new Error('AAC encoder mevcut değil - video sesli');
-      addLog?.('error', 'Convert', `AAC_NOT_FOUND: ${err.message}`, { 
-        stack: err.stack,
-        details: { validation }
-      });
+      addLog?.('error', 'Convert', `AAC_NOT_FOUND: ${err.message}`);
       updateDebugInfo?.({ 
         errorMessage: err.message,
         errorStack: err.stack 
@@ -576,95 +563,154 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
       const errorObj: ConversionError = {
         code: 'AAC_ENCODER_UNAVAILABLE',
         message: 'Bu videoda ses var ancak AAC dönüştürücü yüklenemedi. Lütfen sayfayı yenileyerek tekrar deneyin.',
-        technical: `AAC encoder not available\nvalidation.aac = ${validation.aac}\nparsedMediaInfo.hasAudio = ${parsedMediaInfo.hasAudio}\n${err.stack || ''}`,
+        technical: `AAC encoder not available\nvalidation.aac = ${validation.aac}`,
       };
       setError(errorObj);
       onStageChange?.('error');
       throw err;
     }
-
-    // Step 4: Execute FFmpeg
+  
+    // Step 3: Execute FFmpeg
     onStageChange?.('converting');
     updateProgress(10, 'converting', false);
-    addLog?.('info', 'Convert', 'Dönüştürme başlatılıyor...');
+    addLog?.('info', 'Convert', 'EXEC_STARTED');
+    updateDebugInfo?.({ ffmpegExecStatus: 'running', ffmpegExecStartTime: Date.now() });
 
-    const ffmpegArgs = [
-      '-i', INPUT_FILE,
-      '-c:v', 'libx264',
-      '-preset', 'veryfast',
-      '-crf', crf.toString(),
-      '-pix_fmt', 'yuv420p',
-      '-movflags', '+faststart',
-    ];
+    // Build FFmpeg args - optimize for mobile
+    const ffmpegArgs = ['-i', INPUT_FILE, '-c:v', 'libx264'];
+
+    // Mobile optimization
+    if (mobile) {
+      ffmpegArgs.push('-preset', 'ultrafast', '-threads', '1');
+    } else {
+      ffmpegArgs.push('-preset', 'veryfast');
+    }
+
+    ffmpegArgs.push('-crf', crf.toString(), '-pix_fmt', 'yuv420p', '-movflags', '+faststart');
+
+    // Scale high resolution videos on mobile
+    if (mobile && parsedMediaInfo.resolution) {
+      const [width] = parsedMediaInfo.resolution.split('x').map(Number);
+      if (width > 720) {
+        ffmpegArgs.push('-vf', "scale='min(720,iw)':-2");
+        addLog?.('info', 'Convert', 'Mobil için çözünürlük 720p ile sınırlıyoruz');
+      }
+    }
 
     if (parsedMediaInfo.hasAudio) {
-      ffmpegArgs.push(
-        '-c:a', 'aac',
-        '-b:a', '128k',
-        '-ar', '48000'
-      );
+      ffmpegArgs.push('-c:a', 'aac', '-b:a', '128k', '-ar', '48000');
     } else {
       ffmpegArgs.push('-an');
     }
 
     ffmpegArgs.push(OUTPUT_FILE);
 
-    console.log('[FFmpeg] Command:', ffmpegArgs.join(' '));
-    console.log('[FFmpeg] Has audio:', parsedMediaInfo.hasAudio);
     addLog?.('info', 'FFmpeg', `Komut: ${ffmpegArgs.join(' ')}`);
-    addLog?.('info', 'Convert', 'EXEC_STARTED...');
-    updateDebugInfo?.({ ffmpegExecStartTime: Date.now() });
 
-    // Set up progress handler
+    // Progress handler
     progressHandlerRef.current = (data: { progress: number; time?: number }) => {
-      const p = data.progress;
-      const time = data.time;
-      
-      // Log raw values for debugging
-      console.log('[FFmpeg] Progress raw:', { progress: p, time });
+      lastActivityRef.current = Date.now();
       
       if (!hasReceivedProgress) {
         hasReceivedProgress = true;
-        clearProgressTimeout();
-        console.log('[FFmpeg] First progress event received');
-        addLog?.('success', 'Convert', `PROGRESS_RECEIVED: p=${p}, time=${time}`);
+        clearTimeout(stallTimeoutRef.current!);
+        addLog?.('success', 'Convert', `PROGRESS_RECEIVED`);
       }
       
-      // Safely normalize progress value
-      const normalizedProgress = normalizeProgress(p);
-      
-      // Skip update if progress is invalid (time value or negative)
-      if (normalizedProgress < 0) {
-        console.log('[FFmpeg] Progress ignored (invalid value):', p);
-        return;
-      }
+      const normalizedProgress = normalizeProgress(data.progress);
+      if (normalizedProgress < 0) return;
       
       const percent = 10 + Math.round(normalizedProgress * 85);
-      console.log('[FFmpeg] Progress calculated:', percent, '% (from', p, ')');
       updateProgress(percent, 'converting', true);
-      updateDebugInfo?.({ lastProgressValue: percent, lastProgressRaw: p });
+      updateDebugInfo?.({ lastProgressValue: percent });
     };
     ffmpeg.on('progress', progressHandlerRef.current);
 
-    // Set up progress timeout (30 seconds)
-    progressTimeoutRef.current = setTimeout(() => {
-      console.error('[FFmpeg] Progress timeout - no progress event received in 30 seconds');
-      addLog?.('error', 'Convert', 'PROGRESS_TIMEOUT: 30 saniye içinde progress olayı alınamadı');
-    }, PROGRESS_TIMEOUT_MS);
+    // FFmpeg log handler for activity tracking
+    const ffmpegLogHandler = ({ message }: { message: string }) => {
+      lastActivityRef.current = Date.now();
+      hasReceivedFFmpegActivity = true;
+      
+      // Pass to debug panel
+      addLog?.('info', 'FFmpeg', message);
+    };
+    ffmpeg.on('log', ffmpegLogHandler);
+
+    // Set up stall timeout (90 seconds)
+    stallTimeoutRef.current = setTimeout(() => {
+      const timeSinceLastActivity = Date.now() - lastActivityRef.current;
+      if (timeSinceLastActivity >= STALL_TIMEOUT_MS) {
+        addLog?.('error', 'Convert', `EXEC_TIMEOUT: 90 saniye aktivite yok - işlem durduruluyor`);
+        updateDebugInfo?.({ ffmpegExecStatus: 'timeout' });
+        
+        // Terminate FFmpeg
+        ffmpeg.terminate();
+        ffmpegRef.current = null;
+        setIsLoaded(false);
+        
+        clearAllTimeouts();
+        ffmpeg.off('progress', progressHandlerRef.current!);
+        ffmpeg.off('log', ffmpegLogHandler);
+        progressHandlerRef.current = null;
+        
+        const errorObj: ConversionError = {
+          code: 'EXEC_TIMEOUT',
+          message: 'Dönüştürme cihazınızda yanıt vermedi. Video boyutu veya çözünürlüğü cihaz kapasitesini aşmış olabilir.',
+          technical: `90 saniye boyunca progress veya FFmpeg log aktivitesi yok\nSon aktivite: ${new Date(lastActivityRef.current).toISOString()}`,
+        };
+        setError(errorObj);
+        updateDebugInfo?.({ errorCode: 'EXEC_TIMEOUT', errorMessage: errorObj.message });
+        onStageChange?.('error');
+      }
+    }, STALL_TIMEOUT_MS);
+
+    // Get timeout based on device type
+    const execTimeout = isMobileDevice() ? MOBILE_EXEC_TIMEOUT_MS : DESKTOP_EXEC_TIMEOUT_MS;
 
     try {
-      await ffmpeg.exec(ffmpegArgs as string[]);
-      console.log('[FFmpeg] ffmpeg.exec completed successfully');
-      addLog?.('success', 'Convert', 'EXEC_SUCCESS: ffmpeg.exec() tamamlandı');
-    } catch (err) {
-      const { message, stack } = normalizeError(err);
-      clearProgressTimeout();
+      // Wrap ffmpeg.exec with Promise.race for timeout
+      await Promise.race([
+        ffmpeg.exec(ffmpegArgs as string[]),
+        new Promise<void>((_, reject) => {
+          progressTimeoutRef.current = setTimeout(() => {
+            reject(new Error('EXEC_TIMEOUT'));
+          }, execTimeout);
+        })
+      ]);
       
-      addLog?.('error', 'Convert', `EXEC_FAILED: ${message}`, { stack, originalError: err });
-      updateDebugInfo?.({ 
-        errorMessage: `Dönüştürme başlatılamadı: ${message}`, 
-        errorStack: stack 
-      });
+      clearTimeout(progressTimeoutRef.current!);
+      progressTimeoutRef.current = null;
+      addLog?.('success', 'Convert', 'EXEC_SUCCESS');
+      updateDebugInfo?.({ ffmpegExecStatus: 'completed' });
+    } catch (err) {
+      clearTimeout(progressTimeoutRef.current!);
+      progressTimeoutRef.current = null;
+      
+      const { message, stack } = normalizeError(err);
+      
+      // If it's a timeout, terminate FFmpeg
+      if (message === 'EXEC_TIMEOUT' || message.includes('timeout')) {
+        addLog?.('error', 'Convert', `EXEC_TIMEOUT: ${isMobileDevice() ? '180' : '300'} saniye timeout`);
+        updateDebugInfo?.({ ffmpegExecStatus: 'timeout' });
+        
+        // Terminate FFmpeg
+        try { ffmpeg.terminate(); } catch { /* ignore */ }
+        ffmpegRef.current = null;
+        setIsLoaded(false);
+        
+        const errorObj: ConversionError = {
+          code: 'EXEC_TIMEOUT',
+          message: 'Dönüştürme cihazınızda yanıt vermedi. Video boyutu veya çözünürlüğü cihaz kapasitesini aşmış olabilir.',
+          technical: `${isMobileDevice() ? '180' : '300'} saniye timeout aşıldı\nKomut: ${ffmpegArgs.join(' ')}`,
+        };
+        setError(errorObj);
+        updateDebugInfo?.({ errorCode: 'EXEC_TIMEOUT', errorMessage: errorObj.message });
+        onStageChange?.('error');
+        throw err;
+      }
+      
+      addLog?.('error', 'Convert', `EXEC_FAILED: ${message}`);
+      updateDebugInfo?.({ ffmpegExecStatus: 'error' });
       
       let errorMessage = 'Video dönüştürülürken bir sorun oluştu. Lütfen daha küçük bir dosyayla tekrar deneyin veya farklı bir tarayıcı kullanın.';
       let errorCode = 'CONVERSION_ERROR';
@@ -672,27 +718,25 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
       if (message.includes('memory') || message.includes('Memory')) {
         errorMessage = 'Cihaz belleği yetersiz. Lütfen daha küçük bir dosya deneyin.';
         errorCode = 'MEMORY_ERROR';
-      } else if (!hasReceivedProgress) {
-        errorMessage = 'Video dönüştürme başlatılamadı. Bu genellikle cihaz belleğinin yetersiz olduğu anlamına gelir.';
-        errorCode = 'PROGRESS_TIMEOUT';
       }
 
       const errorObj: ConversionError = {
         code: errorCode,
         message: errorMessage,
-        technical: `ffmpeg.exec() başarısız\nKomut: ${ffmpegArgs.join(' ')}\n${message}\nhasReceivedProgress: ${hasReceivedProgress}\nStack: ${stack || 'yok'}`,
+        technical: `ffmpeg.exec() başarısız\nKomut: ${ffmpegArgs.join(' ')}\n${message}`,
       };
       setError(errorObj);
       updateDebugInfo?.({ errorCode, errorMessage });
       onStageChange?.('error');
-      throw err; // Re-throw ORIGINAL error
+      throw err;
     }
     
-    clearProgressTimeout();
-    ffmpeg.off('progress', progressHandlerRef.current);
+    clearAllTimeouts();
+    ffmpeg.off('progress', progressHandlerRef.current!);
+    ffmpeg.off('log', ffmpegLogHandler);
     progressHandlerRef.current = null;
 
-    // Step 5: Read output file
+    // Step 4: Read output file
     onStageChange?.('finalizing');
     updateProgress(95, 'finalizing', true);
     addLog?.('info', 'Convert', 'MP4 okunuyor...');
@@ -710,7 +754,7 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
       addLog?.('success', 'Convert', `OUTPUT_READ_SUCCESS: ${outputData instanceof Uint8Array ? outputData.byteLength : 'bilinmiyor'} bytes`);
     } catch (err) {
       const { message, stack } = normalizeError(err);
-      addLog?.('error', 'Convert', `OUTPUT_READ_FAILED: ${message}`, { stack, originalError: err });
+      addLog?.('error', 'Convert', `OUTPUT_READ_FAILED: ${message}`);
       updateDebugInfo?.({ 
         errorMessage: `MP4 dosyası okunamadı: ${message}`, 
         errorStack: stack 
@@ -718,15 +762,16 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
       const errorObj: ConversionError = {
         code: 'OUTPUT_READ_ERROR',
         message: 'MP4 dosyası okunamadı.',
-        technical: `ffmpeg.readFile("${OUTPUT_FILE}") başarısız\n${message}\nStack: ${stack || 'yok'}`,
+        technical: `ffmpeg.readFile("${OUTPUT_FILE}") başarısız\n${message}`,
       };
       setError(errorObj);
       onStageChange?.('error');
-      throw err; // Re-throw ORIGINAL error
+      throw err;
     }
 
     onStageChange?.('complete');
     updateProgress(100, 'complete', true);
+    updateDebugInfo?.({ ffmpegExecStatus: 'completed' });
 
     let uint8Output: Uint8Array;
     if (outputData instanceof Uint8Array) {
@@ -741,11 +786,11 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
     const blob = new Blob([uint8Output.buffer as ArrayBuffer], { type: 'video/mp4' });
     const duration = (Date.now() - startTimeRef.current) / 1000;
     
-    console.log('[FFmpeg] Conversion completed in', duration.toFixed(1), 'seconds');
     addLog?.('success', 'Convert', `CONVERSION_COMPLETE: ${duration.toFixed(1)} sn, ${blob.size} bytes`);
+    updateDebugInfo?.({ fileWriteStatus: 'written' });
 
     // Cleanup
-    clearProgressTimeout();
+    clearAllTimeouts();
     if (progressHandlerRef.current && ffmpeg) {
       ffmpeg.off('progress', progressHandlerRef.current);
       progressHandlerRef.current = null;
@@ -763,14 +808,18 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
       fileSize: blob.size,
       duration,
     };
-  }, [cleanupAllFiles, parseMediaInfo, updateProgress, clearProgressTimeout, addLog, updateDebugInfo, normalizeError, normalizeProgress]);
+  }, [cleanupAllFiles, parseMediaInfo, updateProgress, clearAllTimeouts, addLog, updateDebugInfo, normalizeError, normalizeProgress]);
 
   const terminate = useCallback(() => {
-    clearProgressTimeout();
+    clearAllTimeouts();
     if (ffmpegRef.current) {
       if (logHandlerRef.current) {
         ffmpegRef.current.off('log', logHandlerRef.current);
         logHandlerRef.current = null;
+      }
+      if (ffmpegLogHandlerRef.current) {
+        ffmpegRef.current.off('log', ffmpegLogHandlerRef.current);
+        ffmpegLogHandlerRef.current = null;
       }
       if (progressHandlerRef.current) {
         ffmpegRef.current.off('progress', progressHandlerRef.current);
@@ -787,7 +836,8 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
     }
     setProgress({ percent: 0, time: 0, stage: 'idle', hasProgress: false });
     setError(null);
-  }, [clearProgressTimeout]);
+    updateDebugInfo?.({ ffmpegExecStatus: 'idle', fileWriteStatus: 'idle' });
+  }, [clearAllTimeouts, updateDebugInfo]);
 
   return {
     isLoaded,

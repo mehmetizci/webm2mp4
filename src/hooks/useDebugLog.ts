@@ -24,6 +24,7 @@ export interface ConversionDebugInfo {
   encoderValidationStatus: 'idle' | 'validating' | 'completed' | 'error';
   encoderValidationResult: { h264: boolean; aac: boolean } | null;
   fileWriteStatus: 'idle' | 'writing' | 'written' | 'error';
+  ffmpegExecStatus: 'idle' | 'running' | 'completed' | 'error' | 'timeout';
   ffmpegExecStartTime: number | null;
   lastProgressValue: number | null;
   lastLogLines: string[];
@@ -52,15 +53,11 @@ function formatTimestamp(): string {
 function extractStateFromLog(step: string, message: string, level: LogLevel): Partial<ConversionDebugInfo> | null {
   const updates: Partial<ConversionDebugInfo> = {};
 
-  // Debug logging
-  if (typeof window !== 'undefined' && process.env.NODE_ENV === 'development') {
-    console.debug('[DebugLog] extractStateFromLog:', { step, message: message.substring(0, 60), level });
-  }
-
   // Error handling
   if (level === 'error') {
     if (step === 'FFmpeg' || step === 'Load' || step === 'Convert' || message.includes('FFmpeg')) {
       updates.ffmpegLoadStatus = 'error';
+      updates.ffmpegExecStatus = 'error';
     }
     if (message.includes('WASM')) {
       updates.wasmLoadStatus = 'error';
@@ -71,8 +68,13 @@ function extractStateFromLog(step: string, message: string, level: LogLevel): Pa
     if (message.includes('Encoder')) {
       updates.encoderValidationStatus = 'error';
     }
-    if (step === 'Convert' || step === 'File' || message.includes('Dosya')) {
-      updates.fileWriteStatus = 'error';
+    if (step === 'Convert' || step === 'File') {
+      if (message.includes('WRITE_FILE_FAILED')) {
+        updates.fileWriteStatus = 'error';
+      }
+      if (message.includes('EXEC_FAILED') || message.includes('EXEC_ERROR')) {
+        updates.ffmpegExecStatus = 'error';
+      }
     }
     const result = Object.keys(updates).length > 0 ? updates : null;
     return result;
@@ -152,25 +154,34 @@ function extractStateFromLog(step: string, message: string, level: LogLevel): Pa
   }
 
   // ========== 'Convert' / 'File' step ==========
+  // fileWriteStatus - only these exact markers
   if (step === 'Convert' || step === 'File') {
-    if (message.includes('başlatılıyor') || message.includes('starting') || message.includes('okunuyor') || message.includes('EXEC_STARTED')) {
+    if (message.includes('WRITE_FILE_STARTED')) {
       updates.fileWriteStatus = 'writing';
     }
-    if (message.includes('tamamlandı') || message.includes('complete') || message.includes('EXEC_SUCCESS') || message.includes('OUTPUT_READ_SUCCESS')) {
+    if (message.includes('WRITE_FILE_SUCCESS')) {
       updates.fileWriteStatus = 'written';
+    }
+    if (message.includes('WRITE_FILE_FAILED')) {
+      updates.fileWriteStatus = 'error';
+    }
+    
+    // ffmpegExecStatus
+    if (message.includes('EXEC_STARTED')) {
+      updates.ffmpegExecStatus = 'running';
+    }
+    if (message.includes('EXEC_SUCCESS') || message.includes('EXEC_COMPLETE') || message.includes('CONVERSION_COMPLETE')) {
+      updates.ffmpegExecStatus = 'completed';
+    }
+    if (message.includes('EXEC_FAILED') || message.includes('EXEC_ERROR')) {
+      updates.ffmpegExecStatus = 'error';
+    }
+    if (message.includes('EXEC_TIMEOUT') || message.includes('ZAMAN ASIMI') || message.includes('TIMEOUT')) {
+      updates.ffmpegExecStatus = 'timeout';
     }
   }
 
-  // Check for specific success markers in any message
-  if (message.includes('WRITE_FILE_SUCCESS') || message.includes('OUTPUT_READ_SUCCESS') || message.includes('CONVERSION_COMPLETE')) {
-    updates.fileWriteStatus = 'written';
-  }
-
-  const result = Object.keys(updates).length > 0 ? updates : null;
-  if (typeof window !== 'undefined' && process.env.NODE_ENV === 'development') {
-    console.debug('[DebugLog] State updates:', result);
-  }
-  return result;
+  return Object.keys(updates).length > 0 ? updates : null;
 }
 
 interface UseDebugLogReturn {
@@ -196,6 +207,7 @@ const initialDebugInfo: ConversionDebugInfo = {
   encoderValidationStatus: 'idle',
   encoderValidationResult: null,
   fileWriteStatus: 'idle',
+  ffmpegExecStatus: 'idle',
   ffmpegExecStartTime: null,
   lastProgressValue: null,
   lastLogLines: [],
@@ -255,10 +267,10 @@ export function useDebugLog(): UseDebugLogReturn {
         newLogs.shift();
       }
 
-      // Also update last log lines for quick reference
+      // Also update last log lines for quick reference (FFmpeg raw logs)
       let newLastLines = prev.lastLogLines;
-      if (level === 'info' && (step === 'FFmpeg' || message.includes('[FFmpeg]'))) {
-        newLastLines = [...prev.lastLogLines, `[${step}] ${message}`];
+      if (step === 'FFmpeg') {
+        newLastLines = [...prev.lastLogLines, message];
         if (newLastLines.length > MAX_LOG_LINES) {
           newLastLines.shift();
         }

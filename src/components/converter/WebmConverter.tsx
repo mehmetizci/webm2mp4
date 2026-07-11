@@ -65,6 +65,7 @@ export function WebmConverter() {
     isLoaded: ffmpegLoaded, 
     isLoading: ffmpegLoading, 
     progress, 
+    error: ffmpegError,
     loadFFmpeg, 
     analyzeMedia,
     convert,
@@ -72,6 +73,13 @@ export function WebmConverter() {
   } = useFfmpeg({ addLog, updateDebugInfo });
 
   const { metadata, previewUrl, error: metadataError } = useVideoMetadataState(selectedFile);
+
+  // Sync ffmpegError to conversionError
+  useEffect(() => {
+    if (ffmpegError && !conversionError) {
+      setConversionError(ffmpegError);
+    }
+  }, [ffmpegError, conversionError]);
 
   const browserCheck = typeof window !== 'undefined' 
     ? checkBrowserSupport() 
@@ -178,8 +186,18 @@ export function WebmConverter() {
     } catch (err) {
       const error = err instanceof Error ? err : new Error(String(err));
       addLog('error', 'Conversion', `YAKALANAN HATA: ${error.message}`, { stack: error.stack });
+      
+      // Use the error from useFfmpeg if available, otherwise create one
+      const conversionErrorObj = ffmpegError || {
+        code: 'CONVERSION_ERROR',
+        message: 'Video dönüştürülürken bir hata oluştu.',
+        technical: error.message,
+      };
+      
+      setConversionError(conversionErrorObj);
       updateDebugInfo({
-        errorMessage: error.message,
+        errorCode: conversionErrorObj.code,
+        errorMessage: conversionErrorObj.message,
         errorStack: error.stack,
       });
       setStage('error');
@@ -187,7 +205,7 @@ export function WebmConverter() {
       setIsConverting(false);
       stopElapsedTimer();
     }
-  }, [selectedFile, ffmpegLoaded, loadFFmpeg, convert, settings.quality, mediaInfo, resetDebugInfo, setFileInfo, startElapsedTimer, addLog, updateDebugInfo, stopElapsedTimer]);
+  }, [selectedFile, ffmpegLoaded, ffmpegError, loadFFmpeg, convert, settings.quality, mediaInfo, resetDebugInfo, setFileInfo, startElapsedTimer, addLog, updateDebugInfo, stopElapsedTimer]);
 
   const handleRetry = useCallback(() => {
     updateDebugInfo({ errorCode: null, errorMessage: null, errorStack: null });

@@ -36,11 +36,13 @@ function StatusBadge({ status }: { status: string }) {
       case 'analyzing':
       case 'validating':
       case 'writing':
+      case 'running':
         return { icon: Loader2, color: 'text-blue-600 bg-blue-50', label: 'İşleniyor', animate: true };
       case 'error':
         return { icon: XCircle, color: 'text-red-600 bg-red-50', label: 'Hata' };
+      case 'timeout':
+        return { icon: XCircle, color: 'text-orange-600 bg-orange-50', label: 'Zaman aşımı' };
       default:
-        // Never show "idle" - show "Bekliyor" for initial state
         return { icon: Info, color: 'text-slate-400 bg-slate-50', label: 'Bekliyor' };
     }
   };
@@ -149,12 +151,13 @@ export function DebugPanel({ debugInfo, isVisible }: DebugPanelProps) {
 
           {/* Conversion Status */}
           <DebugSection title="Dönüşüm Durumu">
-            <DebugRow label="FFmpeg Load" value={debugInfo.ffmpegLoadStatus} status={debugInfo.ffmpegLoadStatus} />
+            <DebugRow label="FFmpeg Yükleme" value={debugInfo.ffmpegLoadStatus} status={debugInfo.ffmpegLoadStatus} />
             <DebugRow label="Core JS Yükleme" value={debugInfo.coreJsLoadStatus} status={debugInfo.coreJsLoadStatus} />
             <DebugRow label="WASM Yükleme" value={debugInfo.wasmLoadStatus} status={debugInfo.wasmLoadStatus} />
             <DebugRow label="Medya Analizi" value={debugInfo.mediaAnalysisStatus} status={debugInfo.mediaAnalysisStatus} />
             <DebugRow label="Encoder Doğrulama" value={debugInfo.encoderValidationStatus} status={debugInfo.encoderValidationStatus} />
             <DebugRow label="Dosya Yazma" value={debugInfo.fileWriteStatus} status={debugInfo.fileWriteStatus} />
+            <DebugRow label="FFmpeg Dönüşüm" value={debugInfo.ffmpegExecStatus} status={debugInfo.ffmpegExecStatus} />
           </DebugSection>
 
           {/* Encoder Results */}
