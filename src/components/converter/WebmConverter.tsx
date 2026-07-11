@@ -8,8 +8,10 @@ import { ConversionSettings } from './ConversionSettings';
 import { ConversionProgress } from './ConversionProgress';
 import { ConversionResult } from './ConversionResult';
 import { ConversionError } from './ConversionError';
+import { DebugPanel } from './DebugPanel';
 import { useVideoMetadataState } from '@/hooks/useVideoMetadata';
 import { useFfmpeg } from '@/hooks/useFfmpeg';
+import { useDebugLog } from '@/hooks/useDebugLog';
 import type { 
   ConversionSettings as SettingsType, 
   ConversionStage,
@@ -52,6 +54,9 @@ export function WebmConverter() {
   const [stage, setStage] = useState<ConversionStage>('idle');
   const [showLongLoading, setShowLongLoading] = useState(false);
 
+  // Debug logging
+  const { debugInfo, addLog, updateDebugInfo, resetDebugInfo, setFileInfo, startElapsedTimer, stopElapsedTimer } = useDebugLog();
+
   const { 
     isLoaded: ffmpegLoaded, 
     isLoading: ffmpegLoading, 
@@ -60,7 +65,7 @@ export function WebmConverter() {
     analyzeMedia,
     convert,
     terminate,
-  } = useFfmpeg();
+  } = useFfmpeg({ addLog, updateDebugInfo });
 
   const { metadata, previewUrl, error: metadataError } = useVideoMetadataState(selectedFile);
 
@@ -84,21 +89,39 @@ export function WebmConverter() {
   useEffect(() => {
     if (!selectedFile || !ffmpegLoaded || mediaInfo) return;
     
+    // Set file info in debug
+    setFileInfo(selectedFile.name, selectedFile.size, selectedFile.type);
+    addLog('info', 'File', `Dosya seçildi: ${selectedFile.name}`);
+    
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setIsAnalyzing(true);
+    updateDebugInfo({ mediaAnalysisStatus: 'analyzing' });
+    addLog('info', 'Media', 'Medya analizi başlatılıyor');
+    
     analyzeMedia(selectedFile)
-      .then(setMediaInfo)
-      .catch(() => setMediaInfo(null))
-      .finally(() => setIsAnalyzing(false));
-  }, [selectedFile, ffmpegLoaded, analyzeMedia, mediaInfo]);
+      .then((info) => {
+        setMediaInfo(info);
+        updateDebugInfo({ mediaAnalysisStatus: 'completed' });
+        addLog('success', 'Media', `Medya analizi tamamlandı: ${info.resolution || 'bilinmiyor'}`);
+      })
+      .catch((err) => {
+        setMediaInfo(null);
+        updateDebugInfo({ mediaAnalysisStatus: 'error' });
+        addLog('error', 'Media', `Medya analizi hatası: ${err}`);
+      })
+      .finally(() => {
+        setIsAnalyzing(false);
+      });
+  }, [selectedFile, ffmpegLoaded, analyzeMedia, mediaInfo, setFileInfo, addLog, updateDebugInfo]);
 
   const handleFileSelect = useCallback((file: File) => {
+    resetDebugInfo();
     setSelectedFile(file);
     setMediaInfo(null);
     setResult(null);
     setConversionError(null);
     setStage('idle');
-  }, []);
+  }, [resetDebugInfo]);
 
   const handleRemoveFile = useCallback(() => {
     setSelectedFile(null);
@@ -106,32 +129,49 @@ export function WebmConverter() {
     setResult(null);
     setConversionError(null);
     setStage('idle');
-  }, []);
+    resetDebugInfo();
+  }, [resetDebugInfo]);
 
   const handleConvert = useCallback(async () => {
     if (!selectedFile) return;
 
     setConversionError(null);
     setResult(null);
+    resetDebugInfo();
+    setFileInfo(selectedFile.name, selectedFile.size, selectedFile.type);
+    startElapsedTimer();
+    addLog('info', 'Conversion', 'Dönüştürme başlatıldı');
 
     try {
       if (!ffmpegLoaded) {
         setStage('loading');
+        updateDebugInfo({ ffmpegLoadStatus: 'loading' });
+        addLog('info', 'FFmpeg', 'FFmpeg yükleniyor...');
         await loadFFmpeg();
       }
 
       if (!ffmpegLoaded) {
-        throw new Error('FFmpeg y체klenemedi');
+        throw new Error('FFmpeg yüklenemedi');
       }
 
+      addLog('info', 'Conversion', 'Dönüştürme başlatılıyor');
       const convertResult = await convert(selectedFile, settings.quality, setStage);
       setResult(convertResult);
+      addLog('success', 'Conversion', 'Dönüştürme tamamlandı');
     } catch (err) {
-      console.error('Conversion failed:', err);
+      const error = err instanceof Error ? err : new Error(String(err));
+      addLog('error', 'Conversion', `Hata: ${error.message}`, { stack: error.stack });
+      updateDebugInfo({
+        errorMessage: error.message,
+        errorStack: error.stack,
+      });
+    } finally {
+      stopElapsedTimer();
     }
-  }, [selectedFile, ffmpegLoaded, loadFFmpeg, convert, settings.quality]);
+  }, [selectedFile, ffmpegLoaded, loadFFmpeg, convert, settings.quality, resetDebugInfo, setFileInfo, startElapsedTimer, addLog, updateDebugInfo, stopElapsedTimer]);
 
   const handleRetry = useCallback(() => {
+    updateDebugInfo({ errorCode: null, errorMessage: null, errorStack: null });
     terminate();
     setConversionError(null);
     setStage('idle');
@@ -140,7 +180,7 @@ export function WebmConverter() {
         handleConvert();
       }
     }, 100);
-  }, [selectedFile, handleConvert, terminate]);
+  }, [selectedFile, handleConvert, terminate, updateDebugInfo]);
 
   const handleReset = useCallback(() => {
     terminate();
@@ -149,7 +189,8 @@ export function WebmConverter() {
     setResult(null);
     setConversionError(null);
     setStage('idle');
-  }, [terminate]);
+    resetDebugInfo();
+  }, [terminate, resetDebugInfo]);
 
   useEffect(() => {
     return () => {
@@ -262,9 +303,14 @@ export function WebmConverter() {
               onClick={handleRemoveFile}
               className="mt-2 text-sm text-red-500 hover:text-red-700 underline"
             >
-              Farkl캇 bir dosya se챌in
+              Farklı bir dosya seçin
             </button>
           </div>
+        )}
+
+        {/* Debug Panel */}
+        {selectedFile && (
+          <DebugPanel debugInfo={debugInfo} isVisible={true} />
         )}
       </div>
 
