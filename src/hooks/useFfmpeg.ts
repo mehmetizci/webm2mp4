@@ -37,6 +37,7 @@ interface UseFfmpegReturn {
   convert: (
     file: File,
     quality: QualityPreset,
+    mediaInfo: MediaInfo | null,
     onStageChange?: (stage: ConversionStage) => void
   ) => Promise<ConversionResult>;
   terminate: () => void;
@@ -403,6 +404,7 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
   const convert = useCallback(async (
     file: File,
     quality: QualityPreset,
+    mediaInfo: MediaInfo | null,
     onStageChange?: (stage: ConversionStage) => void
   ): Promise<ConversionResult> => {
     const ffmpeg = ffmpegRef.current;
@@ -541,33 +543,37 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
       throw err; // Re-throw ORIGINAL error with full context
     }
 
-    // Step 3: Analyze media
-    onStageChange?.('analyzing');
-    updateProgress(5, 'analyzing', false);
-    addLog?.('info', 'Convert', 'Medya analizi başlatılıyor...');
-    
-    let mediaInfo: MediaInfo;
-    try {
-      mediaInfo = await parseMediaInfo(ffmpeg, file, INPUT_FILE);
-      addLog?.('success', 'Convert', `ANALYSIS_SUCCESS: ${mediaInfo.resolution || 'bilinmiyor'}, sesli: ${mediaInfo.hasAudio}`);
-    } catch (err) {
-      const { message, stack } = normalizeError(err);
-      addLog?.('error', 'Convert', `ANALYSIS_FAILED: ${message}`, { stack, originalError: err });
-      updateDebugInfo?.({ 
-        errorMessage: `Medya analizi başarısız: ${message}`, 
-        errorStack: stack 
-      });
-      const errorObj: ConversionError = {
-        code: 'ANALYSIS_ERROR',
-        message: 'Medya analizi başarısız.',
-        technical: `parseMediaInfo() başarısız\n${message}\nStack: ${stack || 'yok'}`,
-      };
-      setError(errorObj);
-      onStageChange?.('error');
-      throw err; // Re-throw ORIGINAL error
+    // Step 3: Use provided mediaInfo or analyze if not provided
+    let parsedMediaInfo = mediaInfo;
+    if (!parsedMediaInfo) {
+      onStageChange?.('analyzing');
+      updateProgress(5, 'analyzing', false);
+      addLog?.('info', 'Convert', 'Medya analizi başlatılıyor...');
+      
+      try {
+        parsedMediaInfo = await parseMediaInfo(ffmpeg, file, INPUT_FILE);
+        addLog?.('success', 'Convert', `ANALYSIS_SUCCESS: ${parsedMediaInfo.resolution || 'bilinmiyor'}, sesli: ${parsedMediaInfo.hasAudio}`);
+      } catch (err) {
+        const { message, stack } = normalizeError(err);
+        addLog?.('error', 'Convert', `ANALYSIS_FAILED: ${message}`, { stack, originalError: err });
+        updateDebugInfo?.({ 
+          errorMessage: `Medya analizi başarısız: ${message}`, 
+          errorStack: stack 
+        });
+        const errorObj: ConversionError = {
+          code: 'ANALYSIS_ERROR',
+          message: 'Medya analizi başarısız.',
+          technical: `parseMediaInfo() başarısız\n${message}\nStack: ${stack || 'yok'}`,
+        };
+        setError(errorObj);
+        onStageChange?.('error');
+        throw err; // Re-throw ORIGINAL error
+      }
+    } else {
+      addLog?.('info', 'Convert', `Medya bilgisi zaten mevcut: ${parsedMediaInfo.resolution || 'bilinmiyor'}, sesli: ${parsedMediaInfo.hasAudio}`);
     }
 
-    if (mediaInfo.hasAudio && !validation.aac) {
+    if (parsedMediaInfo.hasAudio && !validation.aac) {
       const err = new Error('AAC encoder mevcut değil - video sesli');
       addLog?.('error', 'Convert', `AAC_NOT_FOUND: ${err.message}`, { 
         stack: err.stack,
@@ -580,7 +586,7 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
       const errorObj: ConversionError = {
         code: 'AAC_ENCODER_UNAVAILABLE',
         message: 'Bu videoda ses var ancak AAC dönüştürücü yüklenemedi. Lütfen sayfayı yenileyerek tekrar deneyin.',
-        technical: `AAC encoder not available\nvalidation.aac = ${validation.aac}\nmediaInfo.hasAudio = ${mediaInfo.hasAudio}\n${err.stack || ''}`,
+        technical: `AAC encoder not available\nvalidation.aac = ${validation.aac}\nparsedMediaInfo.hasAudio = ${parsedMediaInfo.hasAudio}\n${err.stack || ''}`,
       };
       setError(errorObj);
       onStageChange?.('error');
@@ -601,7 +607,7 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
       '-movflags', '+faststart',
     ];
 
-    if (mediaInfo.hasAudio) {
+    if (parsedMediaInfo.hasAudio) {
       ffmpegArgs.push(
         '-c:a', 'aac',
         '-b:a', '128k',
@@ -614,7 +620,7 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
     ffmpegArgs.push(OUTPUT_FILE);
 
     console.log('[FFmpeg] Command:', ffmpegArgs.join(' '));
-    console.log('[FFmpeg] Has audio:', mediaInfo.hasAudio);
+    console.log('[FFmpeg] Has audio:', parsedMediaInfo.hasAudio);
     addLog?.('info', 'FFmpeg', `Komut: ${ffmpegArgs.join(' ')}`);
     addLog?.('info', 'Convert', 'EXEC_STARTED...');
     updateDebugInfo?.({ ffmpegExecStartTime: Date.now() });

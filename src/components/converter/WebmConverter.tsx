@@ -160,7 +160,7 @@ export function WebmConverter() {
       }
 
       addLog('info', 'Conversion', 'Dönüştürme başlatılıyor');
-      const convertResult = await convert(selectedFile, settings.quality, setStage);
+      const convertResult = await convert(selectedFile, settings.quality, mediaInfo, setStage);
       setResult(convertResult);
       addLog('success', 'Conversion', 'Dönüştürme tamamlandı');
     } catch (err) {
@@ -175,7 +175,7 @@ export function WebmConverter() {
     } finally {
       stopElapsedTimer();
     }
-  }, [selectedFile, ffmpegLoaded, loadFFmpeg, convert, settings.quality, resetDebugInfo, setFileInfo, startElapsedTimer, addLog, updateDebugInfo, stopElapsedTimer]);
+  }, [selectedFile, ffmpegLoaded, loadFFmpeg, convert, settings.quality, mediaInfo, resetDebugInfo, setFileInfo, startElapsedTimer, addLog, updateDebugInfo, stopElapsedTimer]);
 
   const handleRetry = useCallback(() => {
     updateDebugInfo({ errorCode: null, errorMessage: null, errorStack: null });
