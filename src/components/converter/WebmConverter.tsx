@@ -14,14 +14,17 @@ import { EngineFallback } from './EngineFallback';
 import { useVideoMetadataState } from '@/hooks/useVideoMetadata';
 import { useFfmpeg } from '@/hooks/useFfmpeg';
 import { useDebugLog } from '@/hooks/useDebugLog';
-import { checkWebCodecsSupport } from '@/lib/converters/webCodecsSupport';
 import type { 
   ConversionSettings as SettingsType, 
   ConversionStage,
   ConversionResult as ResultType,
   ConversionError as ErrorType,
 } from '@/types/converter';
-import type { ConversionEngine, WebCodecsSupport } from '@/lib/converters/types';
+import type { 
+  ConversionEngine, 
+  WebCodecsDetectionState,
+} from '@/lib/converters/types';
+import { createInitialDetectionState } from '@/lib/converters/types';
 
 // Type alias for WakeLockSentinel
 type WakeLockSentinelType = WakeLockSentinel;
@@ -82,12 +85,20 @@ export function WebmConverter() {
   const [stage, setStage] = useState<ConversionStage>('idle');
   const [showLongLoading, setShowLongLoading] = useState(false);
   
-  // Conversion engine state
-  const [conversionEngine, setConversionEngine] = useState<ConversionEngine>('ffmpeg');
-  const [webCodecsSupport, setWebCodecsSupport] = useState<WebCodecsSupport>({
-    checking: true,
-    supported: false,
-    reason: null,
+  // Single source of truth for WebCodecs detection
+  const [webCodecsDetection, setWebCodecsDetection] = useState<WebCodecsDetectionState>(
+    createInitialDetectionState()
+  );
+  
+  // Conversion engine state - only set after detection completes
+  const [conversionEngine, setConversionEngine] = useState<ConversionEngine | null>(null);
+  
+  // Track render count for debugging
+  const [renderCount, setRenderCount] = useState(0);
+  
+  // Increment render count
+  useEffect(() => {
+    setRenderCount(c => c + 1);
   });
 
   // Wake Lock ref to prevent screen from sleeping during conversion
@@ -110,139 +121,226 @@ export function WebmConverter() {
 
   const { metadata, previewUrl, error: metadataError } = useVideoMetadataState(selectedFile);
 
-  // Check WebCodecs support function
-  const checkWebCodecsSupportFn = useCallback(async () => {
-    try {
-      const { getWebCodecsCapabilities } = await import('@/lib/converters/webCodecsSupport');
-      const capabilities = await getWebCodecsCapabilities();
-      
-      // Log capabilities to console for debugging
-      console.table({
-        secureContext: capabilities.secureContext,
-        videoEncoder: capabilities.videoEncoder,
-        videoDecoder: capabilities.videoDecoder,
-        videoFrame: capabilities.videoFrame,
-        mediaRecorder: capabilities.mediaRecorder,
-        h264Supported: capabilities.h264Supported,
-        testedCodec: capabilities.testedCodec,
-        failureReason: capabilities.failureReason,
-      });
-      
-      // Map failure reason to ConverterSupportReason
-      let reason: 'WEB_CODECS_API_UNAVAILABLE' | 'H264_ENCODER_UNSUPPORTED' | 'WEB_CODECS_CHECK_FAILED' | null = null;
-      if (capabilities.failureReason) {
-        if (!capabilities.videoEncoder || !capabilities.videoDecoder || !capabilities.videoFrame) {
-          reason = 'WEB_CODECS_API_UNAVAILABLE';
-        } else if (!capabilities.h264Supported) {
-          reason = 'H264_ENCODER_UNSUPPORTED';
-        } else {
-          reason = 'WEB_CODECS_CHECK_FAILED';
-        }
-      }
-      
-      // Update WebCodecsSupport state for UI
-      setWebCodecsSupport({
-        checking: false,
-        supported: capabilities.h264Supported,
-        reason,
-        details: {
-          hasVideoDecoder: capabilities.videoDecoder,
-          hasVideoEncoder: capabilities.videoEncoder,
-          hasVideoFrame: capabilities.videoFrame,
-          hasEncodedVideoChunk: capabilities.videoFrame,
-          h264Supported: capabilities.h264Supported,
-          hardwareAcceleration: capabilities.hardwareAcceleration,
-        },
-      });
-      
-      // Update debug info with detailed capabilities (always update with real values, never null)
+  // Update debug info when detection state changes
+  useEffect(() => {
+    if (webCodecsDetection.capabilities) {
+      const caps = webCodecsDetection.capabilities;
       updateDebugInfo({
-        webCodecsSecureContext: capabilities.secureContext,
-        webCodecsVideoEncoder: capabilities.videoEncoder,
-        webCodecsVideoDecoder: capabilities.videoDecoder,
-        webCodecsVideoFrame: capabilities.videoFrame,
-        webCodecsMediaRecorder: capabilities.mediaRecorder,
-        webCodecsSupported: capabilities.h264Supported,
-        webCodecsSupportReason: capabilities.failureReason,
-        webCodecsFailureDetails: capabilities.errorDetails,
-        webCodecsH264Supported: capabilities.h264Supported,
-        webCodecsH264BaselineSupported: capabilities.h264BaselineSupported,
-        webCodecsTestedCodec: capabilities.testedCodec,
-        webCodecsHardwareAcceleration: capabilities.hardwareAcceleration,
-        webCodecsDetectionTimeMs: capabilities.detectionTimeMs,
-        webCodecsTimedOut: capabilities.timedOut,
-        webCodecsCodecResults: capabilities.codecResults.map(r => ({
+        webCodecsSecureContext: caps.secureContext,
+        webCodecsVideoEncoder: caps.videoEncoder,
+        webCodecsVideoDecoder: caps.videoDecoder,
+        webCodecsVideoFrame: caps.videoFrame,
+        webCodecsMediaRecorder: caps.mediaRecorder,
+        webCodecsSupported: caps.h264Supported,
+        webCodecsSupportReason: caps.failureReason,
+        webCodecsFailureDetails: caps.errorDetails,
+        webCodecsH264Supported: caps.h264Supported,
+        webCodecsH264BaselineSupported: caps.h264BaselineSupported,
+        webCodecsTestedCodec: caps.testedCodec,
+        webCodecsHardwareAcceleration: caps.hardwareAcceleration,
+        webCodecsDetectionTimeMs: caps.detectionTimeMs,
+        webCodecsTimedOut: caps.timedOut,
+        webCodecsCodecResults: caps.codecResults.map(r => ({
           codec: r.codec,
           profile: r.profile,
           supported: r.supported,
         })),
       });
-      
-      // Auto-select based on support and localStorage preference
-      if (capabilities.h264Supported) {
-        const savedEngine = localStorage.getItem(STORAGE_KEY);
+    }
+  }, [webCodecsDetection, updateDebugInfo]);
+
+  // Update selected engine based on detection status
+  useEffect(() => {
+    if (conversionEngine === null && webCodecsDetection.status === 'completed') {
+      const savedEngine = localStorage.getItem(STORAGE_KEY) as ConversionEngine | null;
+      if (webCodecsDetection.capabilities?.h264Supported) {
+        // WebCodecs supported - use saved preference or default to webcodecs
         if (savedEngine === 'webcodecs' || !savedEngine) {
           setConversionEngine('webcodecs');
           updateDebugInfo({ selectedEngine: 'webcodecs' });
+        } else {
+          setConversionEngine(savedEngine);
+          updateDebugInfo({ selectedEngine: savedEngine });
         }
       } else {
+        // WebCodecs not supported - use FFmpeg
         setConversionEngine('ffmpeg');
         updateDebugInfo({ selectedEngine: 'ffmpeg' });
       }
-    } catch (error) {
-      console.error('[WebCodecs] Support detection failed:', error);
-      
-      // Update state with error info
-      setWebCodecsSupport({
-        checking: false,
-        supported: false,
-        reason: 'WEB_CODECS_CHECK_FAILED',
-        details: {
-          hasVideoDecoder: false,
-          hasVideoEncoder: false,
-          hasVideoFrame: false,
-          hasEncodedVideoChunk: false,
-          h264Supported: false,
-          hardwareAcceleration: null,
-        },
-      });
-      
-      // Update debug info with error state (set to false, not null)
-      updateDebugInfo({
-        webCodecsSecureContext: false,
-        webCodecsVideoEncoder: false,
-        webCodecsVideoDecoder: false,
-        webCodecsVideoFrame: false,
-        webCodecsMediaRecorder: false,
-        webCodecsSupported: false,
-        webCodecsSupportReason: 'WEB_CODECS_CHECK_FAILED',
-        webCodecsFailureDetails: error instanceof Error ? error.message : String(error),
-        webCodecsH264Supported: false,
-        webCodecsH264BaselineSupported: false,
-        webCodecsTestedCodec: null,
-        webCodecsHardwareAcceleration: null,
-        webCodecsDetectionTimeMs: null,
-        webCodecsTimedOut: true,
-        webCodecsCodecResults: [],
-      });
-      
-      setConversionEngine('ffmpeg');
-      updateDebugInfo({ selectedEngine: 'ffmpeg' });
     }
-  }, [updateDebugInfo]);
+  }, [webCodecsDetection.status, webCodecsDetection.capabilities, conversionEngine, updateDebugInfo]);
 
-  // Check WebCodecs support on mount
+  // Start WebCodecs detection on mount
   useEffect(() => {
-    checkWebCodecsSupportFn();
-  }, [checkWebCodecsSupportFn]);
+    console.log('[WebCodecs UI] WebmConverter mounted');
+    
+    let active = true;
+    let uiWatchdog: number | null = null;
+    
+    async function runDetection() {
+      console.log('[WebCodecs UI] Detection effect started');
+      
+      // Set to checking state
+      setWebCodecsDetection({
+        status: 'checking',
+        capabilities: null,
+        error: null,
+        startedAt: Date.now(),
+        updatedAt: Date.now(),
+      });
+      
+      // UI watchdog - force fail after 4 seconds
+      uiWatchdog = window.setTimeout(() => {
+        if (!active) return;
+        console.error('[WebCodecs UI] UI watchdog timeout after 4000ms');
+        setWebCodecsDetection(current => {
+          if (current.status !== 'checking') return current;
+          return {
+            status: 'failed',
+            capabilities: current.capabilities,
+            error: 'WebCodecs UI detection timeout after 4000ms',
+            startedAt: current.startedAt,
+            updatedAt: Date.now(),
+          };
+        });
+      }, 4000);
+      
+      try {
+        console.log('[WebCodecs Core] getWebCodecsCapabilities entered');
+        const { getWebCodecsCapabilities } = await import('@/lib/converters/webCodecsSupport');
+        
+        console.log('[WebCodecs Core] Promise.race started');
+        const capabilities = await getWebCodecsCapabilities();
+        console.log('[WebCodecs Core] Detection resolved');
+        
+        // Clear watchdog
+        if (uiWatchdog) {
+          clearTimeout(uiWatchdog);
+          uiWatchdog = null;
+        }
+        
+        if (!active) return;
+        
+        // Log capabilities
+        console.table({
+          detectionId: capabilities.detectionId,
+          secureContext: capabilities.secureContext,
+          videoEncoder: capabilities.videoEncoder,
+          videoDecoder: capabilities.videoDecoder,
+          videoFrame: capabilities.videoFrame,
+          h264Supported: capabilities.h264Supported,
+          failureReason: capabilities.failureReason,
+        });
+        
+        console.log('[WebCodecs UI] Detection state set to completed');
+        setWebCodecsDetection({
+          status: 'completed',
+          capabilities,
+          error: null,
+          startedAt: Date.now(),
+          updatedAt: Date.now(),
+        });
+      } catch (error) {
+        if (uiWatchdog) {
+          clearTimeout(uiWatchdog);
+          uiWatchdog = null;
+        }
+        
+        if (!active) return;
+        
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        console.error('[WebCodecs UI] Detection state set to failed:', errorMessage);
+        
+        setWebCodecsDetection({
+          status: 'failed',
+          capabilities: null,
+          error: errorMessage,
+          startedAt: Date.now(),
+          updatedAt: Date.now(),
+        });
+      }
+    }
+    
+    runDetection();
+    
+    return () => {
+      active = false;
+      if (uiWatchdog) {
+        clearTimeout(uiWatchdog);
+      }
+    };
+  }, []);
 
   // Retry WebCodecs detection
   const retryWebCodecsDetection = useCallback(async () => {
     const { resetWebCodecsCache } = await import('@/lib/converters/webCodecsSupport');
     resetWebCodecsCache();
     addLog('info', 'WebCodecs', 'Tespit yeniden başlatılıyor...');
-    checkWebCodecsSupportFn();
-  }, [addLog, checkWebCodecsSupportFn]);
+    
+    // Reset conversion engine to trigger re-selection
+    setConversionEngine(null);
+    
+    // Set to checking state
+    setWebCodecsDetection({
+      status: 'checking',
+      capabilities: null,
+      error: null,
+      startedAt: Date.now(),
+      updatedAt: Date.now(),
+    });
+    
+    let uiWatchdog: number | null = null;
+    let active = true;
+    
+    uiWatchdog = window.setTimeout(() => {
+      if (!active) return;
+      setWebCodecsDetection(current => {
+        if (current.status !== 'checking') return current;
+        return {
+          status: 'failed',
+          capabilities: current.capabilities,
+          error: 'WebCodecs UI detection timeout after 4000ms',
+          startedAt: current.startedAt,
+          updatedAt: Date.now(),
+        };
+      });
+    }, 4000);
+    
+    try {
+      const { getWebCodecsCapabilities } = await import('@/lib/converters/webCodecsSupport');
+      const capabilities = await getWebCodecsCapabilities();
+      
+      if (uiWatchdog) {
+        clearTimeout(uiWatchdog);
+        uiWatchdog = null;
+      }
+      
+      if (!active) return;
+      
+      setWebCodecsDetection({
+        status: 'completed',
+        capabilities,
+        error: null,
+        startedAt: Date.now(),
+        updatedAt: Date.now(),
+      });
+    } catch (error) {
+      if (uiWatchdog) {
+        clearTimeout(uiWatchdog);
+        uiWatchdog = null;
+      }
+      
+      if (!active) return;
+      
+      setWebCodecsDetection({
+        status: 'failed',
+        capabilities: null,
+        error: error instanceof Error ? error.message : String(error),
+        startedAt: Date.now(),
+        updatedAt: Date.now(),
+      });
+    }
+  }, [addLog]);
 
   // Save engine preference to localStorage
   const handleEngineChange = useCallback((engine: ConversionEngine) => {
@@ -567,7 +665,7 @@ export function WebmConverter() {
             <EngineSelection
               selectedEngine={conversionEngine}
               onEngineChange={handleEngineChange}
-              webCodecsSupport={webCodecsSupport}
+              webCodecsDetection={webCodecsDetection}
               disabled={isConverting || ffmpegLoading}
               onRetryDetection={retryWebCodecsDetection}
             />
@@ -597,7 +695,7 @@ export function WebmConverter() {
         )}
 
         {showResult && (
-          <ConversionResult result={result} engine={conversionEngine} onReset={handleReset} />
+          <ConversionResult result={result} engine={conversionEngine || 'ffmpeg'} onReset={handleReset} />
         )}
 
         {showError && (
@@ -617,7 +715,12 @@ export function WebmConverter() {
         )}
 
         {selectedFile && (
-          <DebugPanel debugInfo={debugInfo} isVisible={true} />
+          <DebugPanel 
+            debugInfo={debugInfo} 
+            isVisible={true}
+            webCodecsDetection={webCodecsDetection}
+            renderCount={renderCount}
+          />
         )}
       </div>
 

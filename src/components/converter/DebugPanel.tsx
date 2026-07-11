@@ -3,10 +3,13 @@
 import { ChevronDown, ChevronUp, Bug, AlertTriangle, CheckCircle, XCircle, Info, Loader2 } from 'lucide-react';
 import { useState } from 'react';
 import type { ConversionDebugInfo, DebugLogEntry } from '@/hooks/useDebugLog';
+import type { WebCodecsDetectionState } from '@/lib/converters/types';
 
 interface DebugPanelProps {
   debugInfo: ConversionDebugInfo;
   isVisible: boolean;
+  webCodecsDetection?: WebCodecsDetectionState;
+  renderCount?: number;
 }
 
 function formatBytes(bytes: number | null): string {
@@ -120,11 +123,14 @@ function DebugRow({ label, value, status }: { label: string; value: string | nul
   );
 }
 
-export function DebugPanel({ debugInfo, isVisible }: DebugPanelProps) {
+export function DebugPanel({ debugInfo, isVisible, webCodecsDetection, renderCount }: DebugPanelProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [showLogs, setShowLogs] = useState(false);
 
   if (!isVisible) return null;
+
+  // Use prop if available, otherwise fall back to debugInfo
+  const detection = webCodecsDetection;
 
   return (
     <div className="mt-5 border border-slate-200 rounded-xl overflow-hidden bg-white">
@@ -146,6 +152,38 @@ export function DebugPanel({ debugInfo, isVisible }: DebugPanelProps) {
 
       {isOpen && (
         <div className="p-4 space-y-4 max-h-[500px] overflow-y-auto">
+          {/* Temporary Debug Info - Detection State */}
+          {renderCount !== undefined && detection && (
+            <DebugSection title="Detection State (Temp)">
+              <DebugRow 
+                label="Status" 
+                value={detection.status} 
+                status={
+                  detection.status === 'completed' ? 'completed' :
+                  detection.status === 'failed' ? 'error' :
+                  detection.status === 'checking' ? 'idle' : undefined
+                }
+              />
+              <DebugRow 
+                label="Render Count" 
+                value={String(renderCount)} 
+              />
+              <DebugRow 
+                label="Updated At" 
+                value={detection.updatedAt ? new Date(detection.updatedAt).toLocaleTimeString() : '-'} 
+              />
+              <DebugRow 
+                label="Error" 
+                value={detection.error || '-'} 
+                status={detection.error ? 'error' : undefined}
+              />
+              <DebugRow 
+                label="Detection ID" 
+                value={detection.capabilities?.detectionId || '-'} 
+              />
+            </DebugSection>
+          )}
+
           {/* Environment Info */}
           <DebugSection title="Çevre Bilgileri">
             <div className="text-slate-500 break-all font-mono bg-white p-2 rounded-lg border border-slate-100">
@@ -160,39 +198,61 @@ export function DebugPanel({ debugInfo, isVisible }: DebugPanelProps) {
             <DebugRow label="MIME Type" value={debugInfo.fileMimeType} />
           </DebugSection>
 
-          {/* WebCodecs Capabilities */}
+          {/* WebCodecs Capabilities - using detection prop or debugInfo */}
           <DebugSection title="WebCodecs Yetenekleri">
-            {debugInfo.webCodecsSecureContext === null ? (
+            {detection?.status === 'idle' && (
+              <DebugRow 
+                label="Durum" 
+                value="Test henüz başlamadı" 
+                status="idle"
+              />
+            )}
+            {detection?.status === 'checking' && (
               <DebugRow 
                 label="Durum" 
                 value="Test ediliyor..." 
                 status="idle"
               />
-            ) : (
+            )}
+            {detection?.status === 'failed' && (
+              <>
+                <DebugRow 
+                  label="Durum" 
+                  value="Test başarısız" 
+                  status="error"
+                />
+                <DebugRow 
+                  label="Hata" 
+                  value={detection.error || 'Bilinmeyen hata'} 
+                  status="error"
+                />
+              </>
+            )}
+            {(detection?.status === 'completed' || debugInfo.webCodecsSecureContext !== null) && (
               <>
                 <DebugRow 
                   label="Secure Context" 
-                  value={debugInfo.webCodecsSecureContext ? 'Evet' : 'Hayır'} 
-                  status={debugInfo.webCodecsSecureContext ? 'completed' : 'error'}
+                  value={(detection?.capabilities?.secureContext ?? debugInfo.webCodecsSecureContext) ? 'Evet' : 'Hayır'} 
+                  status={(detection?.capabilities?.secureContext ?? debugInfo.webCodecsSecureContext) ? 'completed' : 'error'}
                 />
                 <DebugRow 
                   label="VideoEncoder" 
-                  value={debugInfo.webCodecsVideoEncoder ? 'Mevcut' : 'Yok'} 
-                  status={debugInfo.webCodecsVideoEncoder ? 'completed' : 'error'}
+                  value={(detection?.capabilities?.videoEncoder ?? debugInfo.webCodecsVideoEncoder) ? 'Mevcut' : 'Yok'} 
+                  status={(detection?.capabilities?.videoEncoder ?? debugInfo.webCodecsVideoEncoder) ? 'completed' : 'error'}
                 />
                 <DebugRow 
                   label="VideoDecoder" 
-                  value={debugInfo.webCodecsVideoDecoder ? 'Mevcut' : 'Yok'} 
-                  status={debugInfo.webCodecsVideoDecoder ? 'completed' : 'error'}
+                  value={(detection?.capabilities?.videoDecoder ?? debugInfo.webCodecsVideoDecoder) ? 'Mevcut' : 'Yok'} 
+                  status={(detection?.capabilities?.videoDecoder ?? debugInfo.webCodecsVideoDecoder) ? 'completed' : 'error'}
                 />
                 <DebugRow 
                   label="VideoFrame" 
-                  value={debugInfo.webCodecsVideoFrame ? 'Mevcut' : 'Yok'} 
-                  status={debugInfo.webCodecsVideoFrame ? 'completed' : 'error'}
+                  value={(detection?.capabilities?.videoFrame ?? debugInfo.webCodecsVideoFrame) ? 'Mevcut' : 'Yok'} 
+                  status={(detection?.capabilities?.videoFrame ?? debugInfo.webCodecsVideoFrame) ? 'completed' : 'error'}
                 />
                 
                 {/* Individual Codec Test Results */}
-                {debugInfo.webCodecsCodecResults && debugInfo.webCodecsCodecResults.length > 0 && (
+                {(detection?.capabilities?.codecResults ?? debugInfo.webCodecsCodecResults)?.length > 0 && (
                   <div className="mt-2 pt-2 border-t border-slate-200">
                     <p className="text-xs text-slate-500 mb-1.5">Codec Test Sonuçları:</p>
                     {debugInfo.webCodecsCodecResults.map((result, index) => (

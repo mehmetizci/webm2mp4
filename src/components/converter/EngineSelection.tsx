@@ -1,13 +1,12 @@
 'use client';
 
 import { Zap, Globe, AlertTriangle, CheckCircle, Loader2, RefreshCw } from 'lucide-react';
-import type { ConversionEngine, WebCodecsSupport } from '@/lib/converters/types';
-import { getReasonMessage } from '@/lib/converters/webCodecsSupport';
+import type { ConversionEngine, WebCodecsDetectionState } from '@/lib/converters/types';
 
 interface EngineSelectionProps {
-  selectedEngine: ConversionEngine;
+  selectedEngine: ConversionEngine | null;
   onEngineChange: (engine: ConversionEngine) => void;
-  webCodecsSupport: WebCodecsSupport;
+  webCodecsDetection: WebCodecsDetectionState;
   disabled?: boolean;
   onRetryDetection?: () => void;
 }
@@ -15,20 +14,75 @@ interface EngineSelectionProps {
 export function EngineSelection({
   selectedEngine,
   onEngineChange,
-  webCodecsSupport,
+  webCodecsDetection,
   disabled = false,
   onRetryDetection,
 }: EngineSelectionProps) {
+  const { status, capabilities, error } = webCodecsDetection;
+  
   const handleSelect = (engine: ConversionEngine) => {
     if (disabled) return;
-    if (engine === 'webcodecs' && !webCodecsSupport.supported) return;
+    if (engine === 'webcodecs' && status === 'completed' && !capabilities?.h264Supported) return;
     onEngineChange(engine);
   };
 
-  const showRetryButton = !webCodecsSupport.checking && 
-    !webCodecsSupport.supported && 
+  // Show retry button when detection failed or not supported
+  const showRetryButton = 
+    (status === 'failed' || (status === 'completed' && !capabilities?.h264Supported)) && 
     onRetryDetection && 
     !disabled;
+
+  // Determine WebCodecs status text
+  const getWebCodecsStatus = () => {
+    switch (status) {
+      case 'idle':
+        return <span className="text-slate-400 text-xs">Bekleniyor...</span>;
+      case 'checking':
+        return (
+          <div className="flex items-center gap-2 text-slate-500 text-xs">
+            <Loader2 className="w-3 h-3 animate-spin" />
+            Test ediliyor...
+          </div>
+        );
+      case 'completed':
+        if (capabilities?.h264Supported) {
+          return (
+            <div className="flex items-center gap-1.5 text-emerald-600 text-xs">
+              <CheckCircle className="w-3 h-3" />
+              Destekleniyor
+            </div>
+          );
+        }
+        return (
+          <div className="space-y-1.5">
+            <span className="text-slate-500 text-xs">Desteklenmiyor</span>
+            {capabilities?.failureReason && (
+              <p className="text-slate-400 text-xs">
+                {capabilities.failureReason === 'H264_NOT_SUPPORTED' 
+                  ? 'H.264 kodlama desteklenmiyor'
+                  : capabilities.failureReason === 'MISSING_APIS'
+                    ? 'WebCodecs API bulunamadı'
+                    : capabilities.failureReason === 'TIMEOUT'
+                      ? 'Tespit süresi aşıldı'
+                      : 'Bilinmeyen hata'}
+              </p>
+            )}
+          </div>
+        );
+      case 'failed':
+        return (
+          <div className="space-y-1.5">
+            <span className="text-slate-500 text-xs">Test başarısız</span>
+            {error && (
+              <p className="text-amber-600 text-xs flex items-start gap-1.5">
+                <AlertTriangle className="w-3 h-3 shrink-0 mt-0.5" />
+                <span>{error}</span>
+              </p>
+            )}
+          </div>
+        );
+    }
+  };
 
   return (
     <div className="space-y-3">
@@ -55,30 +109,11 @@ export function EngineSelection({
           badgeColor="bg-emerald-100 text-emerald-700"
           icon={<Zap className="w-5 h-5" />}
           selected={selectedEngine === 'webcodecs'}
-          supported={webCodecsSupport.supported}
-          disabled={disabled}
+          supported={status === 'completed' && capabilities?.h264Supported === true}
+          disabled={disabled || (status === 'completed' && !capabilities?.h264Supported)}
           onClick={() => handleSelect('webcodecs')}
         >
-          {webCodecsSupport.checking ? (
-            <div className="flex items-center gap-2 text-slate-500 text-xs">
-              <Loader2 className="w-3 h-3 animate-spin" />
-              Kontrol ediliyor...
-            </div>
-          ) : webCodecsSupport.supported ? (
-            <div className="flex items-center gap-1.5 text-emerald-600 text-xs">
-              <CheckCircle className="w-3 h-3" />
-              Destekleniyor
-            </div>
-          ) : (
-            <div className="space-y-1.5">
-              {webCodecsSupport.reason && (
-                <p className="text-slate-500 text-xs flex items-start gap-1.5">
-                  <AlertTriangle className="w-3 h-3 shrink-0 mt-0.5 text-amber-500" />
-                  <span>{getReasonMessage(webCodecsSupport.reason)}</span>
-                </p>
-              )}
-            </div>
-          )}
+          {getWebCodecsStatus()}
         </EngineCard>
 
         {/* FFmpeg Option */}

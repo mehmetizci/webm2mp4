@@ -98,3 +98,26 @@ export interface WebCodecsSupport {
   reason: ConverterSupportReason | null;
   details?: ConverterSupport['details'];
 }
+
+// Single source of truth for WebCodecs detection state
+import type { WebCodecsCapabilities } from './webCodecsSupport';
+
+export type WebCodecsDetectionStatus = 'idle' | 'checking' | 'completed' | 'failed';
+
+export interface WebCodecsDetectionState {
+  status: WebCodecsDetectionStatus;
+  capabilities: WebCodecsCapabilities | null;
+  error: string | null;
+  startedAt: number | null;
+  updatedAt: number | null;
+}
+
+export function createInitialDetectionState(): WebCodecsDetectionState {
+  return {
+    status: 'idle',
+    capabilities: null,
+    error: null,
+    startedAt: null,
+    updatedAt: null,
+  };
+}
