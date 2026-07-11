@@ -15,6 +15,7 @@ import type {
   ConversionStage,
   ConversionResult as ResultType,
   ConversionError as ErrorType,
+  MediaInfo,
 } from '@/types/converter';
 
 function checkBrowserSupport(): { supported: boolean; message?: string } {
@@ -43,6 +44,8 @@ function checkBrowserSupport(): { supported: boolean; message?: string } {
 
 export function WebmConverter() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [mediaInfo, setMediaInfo] = useState<MediaInfo | null>(null);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [settings, setSettings] = useState<SettingsType>({ quality: 'balanced' });
   const [result, setResult] = useState<ResultType | null>(null);
   const [conversionError, setConversionError] = useState<ErrorType | null>(null);
@@ -52,20 +55,34 @@ export function WebmConverter() {
     isLoaded: ffmpegLoaded, 
     isLoading: ffmpegLoading, 
     progress, 
+    capabilities,
     loadFFmpeg, 
+    analyzeMedia,
     convert,
     terminate,
   } = useFfmpeg();
 
   const { metadata, previewUrl, error: metadataError } = useVideoMetadataState(selectedFile);
 
-  // Browser compatibility check - computed once
   const browserCheck = typeof window !== 'undefined' 
     ? checkBrowserSupport() 
     : { supported: true };
 
+  // Analyze media when file is selected and FFmpeg is loaded
+  useEffect(() => {
+    if (!selectedFile || !ffmpegLoaded || mediaInfo) return;
+    
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setIsAnalyzing(true);
+    analyzeMedia(selectedFile)
+      .then(setMediaInfo)
+      .catch(() => setMediaInfo(null))
+      .finally(() => setIsAnalyzing(false));
+  }, [selectedFile, ffmpegLoaded, analyzeMedia, mediaInfo]);
+
   const handleFileSelect = useCallback((file: File) => {
     setSelectedFile(file);
+    setMediaInfo(null);
     setResult(null);
     setConversionError(null);
     setStage('idle');
@@ -73,6 +90,7 @@ export function WebmConverter() {
 
   const handleRemoveFile = useCallback(() => {
     setSelectedFile(null);
+    setMediaInfo(null);
     setResult(null);
     setConversionError(null);
     setStage('idle');
@@ -115,6 +133,7 @@ export function WebmConverter() {
   const handleReset = useCallback(() => {
     terminate();
     setSelectedFile(null);
+    setMediaInfo(null);
     setResult(null);
     setConversionError(null);
     setStage('idle');
@@ -175,9 +194,25 @@ export function WebmConverter() {
             <FileDetails
               file={selectedFile!}
               metadata={metadata}
+              mediaInfo={isAnalyzing ? null : mediaInfo}
               previewUrl={previewUrl}
               onRemove={handleRemoveFile}
             />
+            
+            {capabilities && (
+              <div className="bg-[#F3F4F6] rounded-[10px] p-3 text-xs space-y-1">
+                <p className="font-medium text-[#374151]">Desteklenen Codec&apos;ler:</p>
+                <p className="text-[#6B7280]">
+                  Video: {capabilities.encoders.h264 ? 'H.264 ✓' : ''} 
+                  {capabilities.encoders.vp9 ? 'VP9 ✓' : ''} 
+                  {capabilities.encoders.vp8 ? 'VP8 ✓' : ''}
+                </p>
+                <p className="text-[#6B7280]">
+                  Ses: {capabilities.encoders.aac ? 'AAC ✓' : ''} 
+                  {capabilities.encoders.mp3 ? 'MP3 ✓' : ''}
+                </p>
+              </div>
+            )}
             
             <ConversionSettings
               settings={settings}
@@ -186,13 +221,13 @@ export function WebmConverter() {
 
             <button
               onClick={handleConvert}
-              disabled={ffmpegLoading}
+              disabled={ffmpegLoading || isAnalyzing}
               className="w-full flex items-center justify-center gap-2 py-3 px-4 bg-[#376BFC] text-white font-medium rounded-[10px] hover:bg-[#2563EB] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {ffmpegLoading ? (
+              {ffmpegLoading || isAnalyzing ? (
                 <>
                   <Loader2 className="w-4 h-4 animate-spin" />
-                  Dönüştürücü hazırlanıyor...
+                  {isAnalyzing ? 'Video analiz ediliyor...' : 'Dönüştürücü hazırlanıyor...'}
                 </>
               ) : (
                 <>

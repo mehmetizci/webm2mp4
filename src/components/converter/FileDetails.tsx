@@ -1,18 +1,19 @@
 'use client';
 
-import { Video, Clock, Maximize2, Volume2, X, Film } from 'lucide-react';
-import type { VideoMetadata } from '@/types/converter';
+import { Video, Clock, Maximize2, Volume2, X, Film, Zap } from 'lucide-react';
+import type { VideoMetadata, MediaInfo } from '@/types/converter';
 import { formatFileSize, formatDuration } from '@/lib/file-utils';
 import { formatResolution, getResolutionLabel } from '@/lib/format-utils';
 
 interface FileDetailsProps {
   file: File;
   metadata: VideoMetadata;
+  mediaInfo: MediaInfo | null;
   previewUrl: string | null;
   onRemove: () => void;
 }
 
-export function FileDetails({ file, metadata, previewUrl, onRemove }: FileDetailsProps) {
+export function FileDetails({ file, metadata, mediaInfo, previewUrl, onRemove }: FileDetailsProps) {
   return (
     <div className="w-full space-y-4">
       <div className="relative w-full aspect-video bg-black rounded-[10px] overflow-hidden">
@@ -84,11 +85,67 @@ export function FileDetails({ file, metadata, previewUrl, onRemove }: FileDetail
             <div>
               <p className="text-[10px] text-[#9CA3AF]">Ses</p>
               <p className="text-xs text-[#374151] font-medium">
-                {metadata.hasAudio === null ? 'Bilinmiyor' : metadata.hasAudio ? 'Var' : 'Yok'}
+                {mediaInfo?.hasAudio !== undefined
+                  ? mediaInfo.hasAudio
+                    ? `Var (${mediaInfo.audioCodec?.toUpperCase() || 'AAC'})`
+                    : 'Yok'
+                  : 'Bilinmiyor'}
               </p>
             </div>
           </div>
         </div>
+
+        {mediaInfo && (
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-2 border-t border-[#E5E7EB]">
+            {mediaInfo.videoCodec && (
+              <div className="flex items-center gap-2">
+                <Zap className="w-4 h-4 text-[#9CA3AF]" />
+                <div>
+                  <p className="text-[10px] text-[#9CA3AF]">Video Codec</p>
+                  <p className="text-xs text-[#374151] font-medium">
+                    {mediaInfo.videoCodec.toUpperCase()}
+                  </p>
+                </div>
+              </div>
+            )}
+            
+            {mediaInfo.frameRate && (
+              <div className="flex items-center gap-2">
+                <Film className="w-4 h-4 text-[#9CA3AF]" />
+                <div>
+                  <p className="text-[10px] text-[#9CA3AF]">FPS</p>
+                  <p className="text-xs text-[#374151] font-medium">
+                    {mediaInfo.frameRate.toFixed(1)}
+                  </p>
+                </div>
+              </div>
+            )}
+            
+            {mediaInfo.bitrate && (
+              <div className="flex items-center gap-2">
+                <Zap className="w-4 h-4 text-[#9CA3AF]" />
+                <div>
+                  <p className="text-[10px] text-[#9CA3AF]">Bitrate</p>
+                  <p className="text-xs text-[#374151] font-medium">
+                    {mediaInfo.bitrate} kbps
+                  </p>
+                </div>
+              </div>
+            )}
+            
+            {mediaInfo.audioSampleRate && (
+              <div className="flex items-center gap-2">
+                <Volume2 className="w-4 h-4 text-[#9CA3AF]" />
+                <div>
+                  <p className="text-[10px] text-[#9CA3AF]">Sample Rate</p>
+                  <p className="text-xs text-[#374151] font-medium">
+                    {(mediaInfo.audioSampleRate / 1000).toFixed(1)} kHz
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
         <div className="flex items-center gap-2 pt-2 border-t border-[#E5E7EB]">
           <span className="inline-flex items-center px-2 py-1 rounded-full bg-[#376BFC]/10 text-[#376BFC] text-xs font-medium">
@@ -97,6 +154,11 @@ export function FileDetails({ file, metadata, previewUrl, onRemove }: FileDetail
           {getResolutionLabel(metadata.width, metadata.height) !== 'Düşük' && (
             <span className="inline-flex items-center px-2 py-1 rounded-full bg-[#10B981]/10 text-[#10B981] text-xs font-medium">
               {getResolutionLabel(metadata.width, metadata.height)}
+            </span>
+          )}
+          {mediaInfo?.videoCodec && (
+            <span className="inline-flex items-center px-2 py-1 rounded-full bg-[#6B7280]/10 text-[#6B7280] text-xs font-medium">
+              {mediaInfo.videoCodec.toUpperCase()}
             </span>
           )}
         </div>

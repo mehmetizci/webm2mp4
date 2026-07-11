@@ -4,8 +4,45 @@ export interface VideoMetadata {
   duration: number;
   width: number;
   height: number;
-  hasAudio: boolean | null; // null = bilinmiyor
+  hasAudio: boolean | null;
   frameRate?: number;
+}
+
+export interface MediaInfo {
+  fileName: string;
+  fileSize: number;
+  videoCodec: string | null;
+  pixelFormat: string | null;
+  frameRate: number | null;
+  bitrate: number | null;
+  duration: number | null;
+  hasAudio: boolean;
+  audioCodec: string | null;
+  audioBitrate: number | null;
+  audioSampleRate: number | null;
+  audioChannels: number | null;
+}
+
+export interface EncoderInfo {
+  h264: boolean;
+  vp8: boolean;
+  vp9: boolean;
+  aac: boolean;
+  mp3: boolean;
+}
+
+export interface ConversionCapabilities {
+  encoders: EncoderInfo;
+  videoCodec: 'libx264' | 'libvpx' | 'libvpx-vp9';
+  audioCodec: 'aac' | 'mp3';
+}
+
+export interface FileInfo {
+  file: File;
+  metadata: VideoMetadata | null;
+  mediaInfo: MediaInfo | null;
+  previewUrl: string | null;
+  isAnalyzing: boolean;
 }
 
 export interface ConversionProgress {
