@@ -827,10 +827,11 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
       // FFmpeg may still be loaded even if execution fails
       updateDebugInfo?.({ ffmpegExecStatus: 'error' });
       
+      const execErrorMessage = execError instanceof Error ? execError.message : String(execError);
       const errorObj: ConversionError = {
         code: 'CONVERSION_ERROR',
         message: 'Video dönüştürülürken bir hata oluştu.',
-        technical: `ffmpeg.exec() başarısız\nHata: ${execError.message}`,
+        technical: `ffmpeg.exec() başarısız\nHata: ${execErrorMessage}`,
       };
       setError(errorObj);
       updateDebugInfo?.({ errorCode: 'CONVERSION_ERROR', errorMessage: errorObj.message });
