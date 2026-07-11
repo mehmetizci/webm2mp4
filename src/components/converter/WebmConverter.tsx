@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ShieldCheck, Video, Loader2, AlertTriangle } from 'lucide-react';
 import { FileDropzone } from './FileDropzone';
 import { FileDetails } from './FileDetails';
@@ -48,6 +48,12 @@ export function WebmConverter() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [mediaInfo, setMediaInfo] = useState<MediaInfo | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [isConverting, setIsConverting] = useState(false);
+  const [currentFileKey, setCurrentFileKey] = useState<string | null>(null);
+  
+  // Ref to track the current analysis promise
+  const mediaAnalysisPromiseRef = useRef<Promise<MediaInfo | null> | null>(null);
+  
   const [settings, setSettings] = useState<SettingsType>({ quality: 'balanced' });
   const [result, setResult] = useState<ResultType | null>(null);
   const [conversionError, setConversionError] = useState<ErrorType | null>(null);
@@ -137,21 +143,37 @@ export function WebmConverter() {
 
     setConversionError(null);
     setResult(null);
+    setIsConverting(true);
     resetDebugInfo();
     setFileInfo(selectedFile.name, selectedFile.size, selectedFile.type);
     startElapsedTimer();
     addLog('info', 'Conversion', 'Dönüştürme başlatıldı');
 
     try {
+      // Wait for media analysis if still in progress
+      let resolvedMediaInfo = mediaInfo;
+      if (!resolvedMediaInfo && mediaAnalysisPromiseRef.current) {
+        addLog('info', 'Conversion', 'Devam eden medya analizi bekleniyor...');
+        resolvedMediaInfo = await mediaAnalysisPromiseRef.current;
+        if (resolvedMediaInfo) {
+          addLog('info', 'Media', 'Analiz sonucu dönüşüme aktarıldı');
+        }
+      }
+
+      // Final check for mediaInfo
+      if (!resolvedMediaInfo) {
+        throw new Error('Video analizi tamamlanamadı. Lütfen dosyayı yeniden seçin.');
+      }
+
+      addLog('info', 'Conversion', `Medya bilgisi hazır: ${resolvedMediaInfo.resolution || 'bilinmiyor'}`);
+
       // FFmpeg zaten yüklü mü kontrol et (state)
       if (!ffmpegLoaded) {
         setStage('loading');
         updateDebugInfo({ ffmpegLoadStatus: 'loading' });
         addLog('info', 'FFmpeg', 'FFmpeg yükleniyor...');
-        // loadFFmpeg artık boolean döndürüyor
         const loadSuccess = await loadFFmpeg();
         if (!loadSuccess) {
-          // Hata zaten loadFFmpeg içinde ayarlandı
           addLog('error', 'Conversion', 'FFmpeg yüklenemedi - loadFFmpeg() false döndü');
           setStage('error');
           return;
@@ -160,7 +182,7 @@ export function WebmConverter() {
       }
 
       addLog('info', 'Conversion', 'Dönüştürme başlatılıyor');
-      const convertResult = await convert(selectedFile, settings.quality, mediaInfo, setStage);
+      const convertResult = await convert(selectedFile, settings.quality, resolvedMediaInfo, setStage);
       setResult(convertResult);
       addLog('success', 'Conversion', 'Dönüştürme tamamlandı');
     } catch (err) {
@@ -170,9 +192,9 @@ export function WebmConverter() {
         errorMessage: error.message,
         errorStack: error.stack,
       });
-      // Error should already be set in the convert function, but ensure stage is set to error
       setStage('error');
     } finally {
+      setIsConverting(false);
       stopElapsedTimer();
     }
   }, [selectedFile, ffmpegLoaded, loadFFmpeg, convert, settings.quality, mediaInfo, resetDebugInfo, setFileInfo, startElapsedTimer, addLog, updateDebugInfo, stopElapsedTimer]);
@@ -233,14 +255,14 @@ export function WebmConverter() {
     <div className="w-full max-w-[720px] mx-auto">
       <div className="text-center mb-6 px-5">
         <h1 className="text-[32px] sm:text-[42px] font-bold text-[#1F2937] leading-[38px] sm:leading-[50px] tracking-tight">
-          WebM Dosyan캇z캇 MP4&apos;e D철n체힊t체r체n
+          WebM Dosyanızı MP4'e Dönüştürün
         </h1>
         <p className="text-[17px] leading-[26px] text-[#6B7280] max-w-[640px] mx-auto mt-3">
-          WebM videonuzu y체kleyin, taray캇c캇n캇zda g체venli bir 힊ekilde MP4 format캇na d철n체힊t체r체n ve hemen indirin.
+          WebM videonuzu y체kleyin, tarayıcınızda güvenli bir şekilde MP4 formatına dönüştürün ve hemen indirin.
         </p>
         <div className="inline-flex items-center gap-2 mt-4 px-3 py-2 bg-[#ECFDF5] border border-[#10B981]/20 rounded-[10px]">
           <ShieldCheck className="w-4 h-4 text-[#10B981]" />
-          <span className="text-[14px] text-[#065F46] leading-tight">Dosyan캇z cihaz캇n캇zdan ayr캇lmaz. D철n체힊체m tamamen taray캇c캇n캇zda ger챌ekle힊tirilir.</span>
+          <span className="text-[14px] text-[#065F46] leading-tight">Dosyanız cihazınızdan ayr캇lmaz. Dönüşüm tamamen tarayıcınızda ger챌ekle힊tirilir.</span>
         </div>
       </div>
 
@@ -261,7 +283,7 @@ export function WebmConverter() {
 
             {/* Output format info */}
             <div className="bg-[#F9FAFB] rounded-[10px] p-3 text-xs space-y-1">
-              <p className="font-medium text-[#374151]">횉캇kt캇 Format캇: MP4</p>
+              <p className="font-medium text-[#374151]">Çıktı Formatı: MP4</p>
               <p className="text-[#6B7280]">
                 Video: H.264 | Ses: AAC
               </p>
@@ -274,7 +296,7 @@ export function WebmConverter() {
 
             <button
               onClick={handleConvert}
-              disabled={ffmpegLoading || isAnalyzing}
+              disabled={!selectedFile || isAnalyzing || !mediaInfo || isConverting || ffmpegLoading}
               className="w-full flex items-center justify-center gap-2 py-3 px-4 bg-[#376BFC] text-white font-medium rounded-[10px] hover:bg-[#2563EB] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {ffmpegLoading || isAnalyzing ? (
@@ -328,13 +350,13 @@ export function WebmConverter() {
         <div className="bg-white rounded-[10px] border border-[#E5E7EB] p-4 space-y-2">
           <h3 className="text-[14px] font-medium text-[#374151] flex items-center gap-2">
           <ShieldCheck className="w-4 h-4 text-[#10B981]" />
-          Videonuz g체vende
+          Videonuz güvende
         </h3>
         <p className="text-[13px] text-[#6B7280]">
-          Se챌ti휓iniz video herhangi bir sunucuya y체klenmez. T체m d철n체힊t체rme i힊lemi cihaz캇n캇z캇n taray캇c캇s캇nda ger챌ekle힊tirilir ve i힊lem tamamland캇휓캇nda ge챌ici veriler temizlenir.
+          Seçtiğiniz video herhangi bir sunucuya y체klenmez. Tüm dönüştürme işlemi cihazınızın tarayıcısında ger챌ekle힊tirilir ve işlem tamamlandığında ge챌ici veriler temizlenir.
         </p>
         <ul className="space-y-1">
-          {['Sunucuya dosya y체klenmez', 'Video saklanmaz', '횥yelik gerekmez'].map((item) => (
+          {['Sunucuya dosya yüklenmez', 'Video saklanmaz', 'Üyelik gerekmez'].map((item) => (
             <li key={item} className="flex items-center gap-2 text-[13px] text-[#6B7280]">
               <span className="w-1.5 h-1.5 rounded-full bg-[#10B981]" />
               {item}

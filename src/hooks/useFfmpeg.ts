@@ -37,7 +37,7 @@ interface UseFfmpegReturn {
   convert: (
     file: File,
     quality: QualityPreset,
-    mediaInfo: MediaInfo | null,
+    mediaInfo: MediaInfo,
     onStageChange?: (stage: ConversionStage) => void
   ) => Promise<ConversionResult>;
   terminate: () => void;
@@ -404,7 +404,7 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
   const convert = useCallback(async (
     file: File,
     quality: QualityPreset,
-    mediaInfo: MediaInfo | null,
+    mediaInfo: MediaInfo,
     onStageChange?: (stage: ConversionStage) => void
   ): Promise<ConversionResult> => {
     const ffmpeg = ffmpegRef.current;
