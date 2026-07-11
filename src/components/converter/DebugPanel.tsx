@@ -154,19 +154,9 @@ export function DebugPanel({ debugInfo, isVisible }: DebugPanelProps) {
             <DebugRow label="FFmpeg Yükleme" value={debugInfo.ffmpegLoadStatus} status={debugInfo.ffmpegLoadStatus} />
             <DebugRow label="Core JS Yükleme" value={debugInfo.coreJsLoadStatus} status={debugInfo.coreJsLoadStatus} />
             <DebugRow label="WASM Yükleme" value={debugInfo.wasmLoadStatus} status={debugInfo.wasmLoadStatus} />
-            <DebugRow label="Medya Analizi" value={debugInfo.mediaAnalysisStatus} status={debugInfo.mediaAnalysisStatus} />
-            <DebugRow label="Encoder Doğrulama" value={debugInfo.encoderValidationStatus} status={debugInfo.encoderValidationStatus} />
             <DebugRow label="Dosya Yazma" value={debugInfo.fileWriteStatus} status={debugInfo.fileWriteStatus} />
             <DebugRow label="FFmpeg Dönüşüm" value={debugInfo.ffmpegExecStatus} status={debugInfo.ffmpegExecStatus} />
           </DebugSection>
-
-          {/* Encoder Results */}
-          {debugInfo.encoderValidationResult && (
-            <DebugSection title="Encoder Sonuçları">
-              <DebugRow label="H.264" value={debugInfo.encoderValidationResult.h264 ? 'Destekleniyor' : 'Desteklenmiyor'} status={debugInfo.encoderValidationResult.h264 ? 'loaded' : 'error'} />
-              <DebugRow label="AAC" value={debugInfo.encoderValidationResult.aac ? 'Destekleniyor' : 'Desteklenmiyor'} status={debugInfo.encoderValidationResult.aac ? 'loaded' : 'error'} />
-            </DebugSection>
-          )}
 
           {/* Execution Info */}
           <DebugSection title="Çalıştırma Bilgileri">

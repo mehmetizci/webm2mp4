@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { ShieldCheck, Video, Loader2, AlertTriangle, Lock } from 'lucide-react';
 import { FileDropzone } from './FileDropzone';
 import { FileDetails } from './FileDetails';
@@ -17,7 +17,6 @@ import type {
   ConversionStage,
   ConversionResult as ResultType,
   ConversionError as ErrorType,
-  MediaInfo,
 } from '@/types/converter';
 
 function checkBrowserSupport(): { supported: boolean; message?: string } {
@@ -44,14 +43,27 @@ function checkBrowserSupport(): { supported: boolean; message?: string } {
   return { supported: true };
 }
 
+// Simple file validation
+function validateFile(file: File): { valid: boolean; error?: string } {
+  if (!file) {
+    return { valid: false, error: 'Dosya mevcut değil' };
+  }
+  
+  if (file.size === 0) {
+    return { valid: false, error: 'Dosya boyutu 0 byte' };
+  }
+  
+  const extension = file.name.toLowerCase().split('.').pop();
+  if (extension !== 'webm') {
+    return { valid: false, error: 'Yalnızca .webm dosyaları desteklenir' };
+  }
+  
+  return { valid: true };
+}
+
 export function WebmConverter() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [mediaInfo, setMediaInfo] = useState<MediaInfo | null>(null);
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isConverting, setIsConverting] = useState(false);
-  const [currentFileKey, setCurrentFileKey] = useState<string | null>(null);
-  
-  const mediaAnalysisPromiseRef = useRef<Promise<MediaInfo | null> | null>(null);
   
   const [settings, setSettings] = useState<SettingsType>({ quality: 'balanced' });
   const [result, setResult] = useState<ResultType | null>(null);
@@ -67,7 +79,6 @@ export function WebmConverter() {
     progress, 
     error: ffmpegError,
     loadFFmpeg, 
-    analyzeMedia,
     convert,
     terminate,
   } = useFfmpeg({ addLog, updateDebugInfo });
@@ -97,55 +108,37 @@ export function WebmConverter() {
   }, [ffmpegLoading, stage]);
 
   const handleFileSelect = useCallback(async (file: File) => {
+    // Simple validation
+    const validation = validateFile(file);
+    if (!validation.valid) {
+      addLog('error', 'File', `Geçersiz dosya: ${validation.error}`);
+      return;
+    }
+    
     resetDebugInfo();
     setSelectedFile(file);
-    setMediaInfo(null);
     setResult(null);
     setConversionError(null);
     setStage('idle');
     setFileInfo(file.name, file.size, file.type);
-    addLog('info', 'File', `Dosya seçildi: ${file.name}`);
+    addLog('info', 'File', `Dosya seçildi: ${file.name} (${(file.size / (1024 * 1024)).toFixed(2)}MB)`);
 
-    // FFmpeg yüklenmemişse önce yükle
+    // FFmpeg yüklenmemişse yükle
     if (!ffmpegLoaded) {
-      addLog('info', 'FFmpeg', 'Medya analizi için FFmpeg yükleniyor...');
+      addLog('info', 'Load', 'FFmpeg yükleniyor...');
       updateDebugInfo({ ffmpegLoadStatus: 'loading' });
       const loadSuccess = await loadFFmpeg();
       if (!loadSuccess) {
-        addLog('error', 'FFmpeg', 'FFmpeg yüklenemedi');
+        addLog('error', 'Load', 'FFmpeg yüklenemedi');
         updateDebugInfo({ ffmpegLoadStatus: 'error' });
         return;
       }
-      addLog('success', 'FFmpeg', 'FFmpeg başarıyla yüklendi');
-      updateDebugInfo({ ffmpegLoadStatus: 'loaded' });
+      addLog('success', 'Load', 'FFmpeg hazır');
     }
-
-    // Medya analizini başlat
-    setIsAnalyzing(true);
-    updateDebugInfo({ mediaAnalysisStatus: 'analyzing' });
-    addLog('info', 'Media', 'Medya analizi başlatılıyor');
-
-    try {
-      const info = await analyzeMedia(file);
-      if (!info) {
-        throw new Error('Medya analizi sonuç döndürmedi');
-      }
-      setMediaInfo(info);
-      updateDebugInfo({ mediaAnalysisStatus: 'completed' });
-      addLog('success', 'Media', `Medya analizi tamamlandı: ${info.resolution || 'bilinmiyor'}`);
-    } catch (err) {
-      setMediaInfo(null);
-      updateDebugInfo({ mediaAnalysisStatus: 'error' });
-      const errorMsg = err instanceof Error ? err.message : 'Medya analizi başarısız';
-      addLog('error', 'Media', `Medya analizi hatası: ${errorMsg}`);
-    } finally {
-      setIsAnalyzing(false);
-    }
-  }, [ffmpegLoaded, loadFFmpeg, analyzeMedia, resetDebugInfo, setFileInfo, addLog, updateDebugInfo]);
+  }, [ffmpegLoaded, loadFFmpeg, resetDebugInfo, setFileInfo, addLog, updateDebugInfo]);
 
   const handleRemoveFile = useCallback(() => {
     setSelectedFile(null);
-    setMediaInfo(null);
     setResult(null);
     setConversionError(null);
     setStage('idle');
@@ -153,7 +146,7 @@ export function WebmConverter() {
   }, [resetDebugInfo]);
 
   const handleConvert = useCallback(async () => {
-    if (!selectedFile || !mediaInfo) return;
+    if (!selectedFile) return;
 
     setConversionError(null);
     setResult(null);
@@ -161,33 +154,31 @@ export function WebmConverter() {
     resetDebugInfo();
     setFileInfo(selectedFile.name, selectedFile.size, selectedFile.type);
     startElapsedTimer();
-    addLog('info', 'Conversion', 'Dönüştürme başlatıldı');
+    addLog('info', 'Convert', 'Dönüştürme başlatıldı');
 
     try {
-      // FFmpeg zaten yüklenmiş olmalı (handleFileSelect'te yüklendi)
+      // FFmpeg yüklenmemişse yükle
       if (!ffmpegLoaded) {
         setStage('loading');
         updateDebugInfo({ ffmpegLoadStatus: 'loading' });
-        addLog('info', 'FFmpeg', 'FFmpeg yükleniyor...');
+        addLog('info', 'Load', 'FFmpeg yükleniyor...');
         const loadSuccess = await loadFFmpeg();
         if (!loadSuccess) {
-          addLog('error', 'Conversion', 'FFmpeg yüklenemedi - loadFFmpeg() false döndü');
+          addLog('error', 'Convert', 'FFmpeg yüklenemedi');
           setStage('error');
           return;
         }
-        addLog('success', 'Conversion', 'FFmpeg başarıyla yüklendi');
+        addLog('success', 'Load', 'FFmpeg hazır');
       }
 
-      addLog('info', 'Conversion', `Medya bilgisi hazır: ${mediaInfo.resolution || 'bilinmiyor'}`);
-      addLog('info', 'Conversion', 'Dönüştürme başlatılıyor');
-      const convertResult = await convert(selectedFile, settings.quality, mediaInfo, setStage);
+      addLog('info', 'Convert', 'Dönüştürme başlatılıyor');
+      const convertResult = await convert(selectedFile, settings.quality, setStage);
       setResult(convertResult);
-      addLog('success', 'Conversion', 'Dönüştürme tamamlandı');
+      addLog('success', 'Convert', 'Dönüştürme tamamlandı');
     } catch (err) {
       const error = err instanceof Error ? err : new Error(String(err));
-      addLog('error', 'Conversion', `YAKALANAN HATA: ${error.message}`, { stack: error.stack });
+      addLog('error', 'Convert', `HATA: ${error.message}`);
       
-      // Use the error from useFfmpeg if available, otherwise create one
       const conversionErrorObj = ffmpegError || {
         code: 'CONVERSION_ERROR',
         message: 'Video dönüştürülürken bir hata oluştu.',
@@ -198,14 +189,13 @@ export function WebmConverter() {
       updateDebugInfo({
         errorCode: conversionErrorObj.code,
         errorMessage: conversionErrorObj.message,
-        errorStack: error.stack,
       });
       setStage('error');
     } finally {
       setIsConverting(false);
       stopElapsedTimer();
     }
-  }, [selectedFile, ffmpegLoaded, ffmpegError, loadFFmpeg, convert, settings.quality, mediaInfo, resetDebugInfo, setFileInfo, startElapsedTimer, addLog, updateDebugInfo, stopElapsedTimer]);
+  }, [selectedFile, ffmpegLoaded, ffmpegError, loadFFmpeg, convert, settings.quality, resetDebugInfo, setFileInfo, startElapsedTimer, addLog, updateDebugInfo, stopElapsedTimer]);
 
   const handleRetry = useCallback(() => {
     updateDebugInfo({ errorCode: null, errorMessage: null, errorStack: null });
@@ -222,7 +212,6 @@ export function WebmConverter() {
   const handleReset = useCallback(() => {
     terminate();
     setSelectedFile(null);
-    setMediaInfo(null);
     setResult(null);
     setConversionError(null);
     setStage('idle');
@@ -286,7 +275,6 @@ export function WebmConverter() {
             <FileDetails
               file={selectedFile!}
               metadata={metadata}
-              mediaInfo={isAnalyzing ? null : mediaInfo}
               previewUrl={previewUrl}
             />
 
@@ -309,13 +297,13 @@ export function WebmConverter() {
 
             <button
               onClick={handleConvert}
-              disabled={!selectedFile || isAnalyzing || !mediaInfo || isConverting || ffmpegLoading}
+              disabled={!selectedFile || isConverting || ffmpegLoading}
               className="w-full flex items-center justify-center gap-2.5 py-3.5 px-5 bg-[#376BFC] text-white font-medium rounded-xl hover:bg-[#2858E0] active:scale-[0.98] transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
             >
-              {ffmpegLoading || isAnalyzing ? (
+              {ffmpegLoading || isConverting ? (
                 <>
                   <Loader2 className="w-5 h-5 animate-spin" />
-                  {isAnalyzing ? 'Video analiz ediliyor...' : showLongLoading ? 'Dönüştürücü yükleniyor...' : 'Dönüştürücü hazırlanıyor...'}
+                  {showLongLoading ? 'Dönüştürücü yükleniyor...' : 'Dönüştürücü hazırlanıyor...'}
                 </>
               ) : (
                 <>

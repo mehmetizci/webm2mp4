@@ -1,19 +1,18 @@
 'use client';
 
 import { Video, Clock, Maximize2, Volume2, Film, VolumeX, FileVideo } from 'lucide-react';
-import type { VideoMetadata, MediaInfo } from '@/types/converter';
+import type { VideoMetadata } from '@/types/converter';
 import { formatFileSize, formatDuration } from '@/lib/file-utils';
 
 interface FileDetailsProps {
   file: File;
   metadata: VideoMetadata | null;
-  mediaInfo: MediaInfo | null;
   previewUrl: string | null;
 }
 
-export function FileDetails({ file, metadata, mediaInfo, previewUrl }: FileDetailsProps) {
-  const resolution = mediaInfo?.resolution || (metadata ? `${metadata.width}x${metadata.height}` : null);
-  const duration = metadata?.duration || mediaInfo?.duration || null;
+export function FileDetails({ file, metadata, previewUrl }: FileDetailsProps) {
+  const resolution = metadata ? `${metadata.width}x${metadata.height}` : null;
+  const duration = metadata?.duration || null;
 
   return (
     <div className="w-full space-y-4">
@@ -85,94 +84,19 @@ export function FileDetails({ file, metadata, mediaInfo, previewUrl }: FileDetai
 
           <div className="flex items-center gap-2.5">
             <div className="w-8 h-8 rounded-lg bg-white flex items-center justify-center shadow-sm shrink-0">
-              {mediaInfo?.hasAudio ? (
-                <Volume2 className="w-4 h-4 text-slate-400" />
-              ) : (
-                <VolumeX className="w-4 h-4 text-slate-400" />
-              )}
+              <VolumeX className="w-4 h-4 text-slate-400" />
             </div>
             <div>
               <p className="text-[10px] text-slate-400">Ses</p>
-              <p className="text-xs text-slate-700 font-medium">
-                {mediaInfo?.hasAudio !== undefined 
-                  ? mediaInfo.hasAudio 
-                    ? `Var (${mediaInfo.audioCodec?.toUpperCase() || 'Bilinmiyor'})` 
-                    : 'Yok'
-                  : 'Bilinmiyor'}
-              </p>
+              <p className="text-xs text-slate-700 font-medium">--</p>
             </div>
           </div>
         </div>
-
-        {mediaInfo && (
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-3 border-t border-slate-100">
-            {mediaInfo.videoCodec && (
-              <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-lg bg-white flex items-center justify-center shadow-sm shrink-0">
-                  <Film className="w-4 h-4 text-slate-400" />
-                </div>
-                <div>
-                  <p className="text-[10px] text-slate-400">Codec</p>
-                  <p className="text-xs text-slate-700 font-medium">
-                    {mediaInfo.videoCodec.toUpperCase()}
-                  </p>
-                </div>
-              </div>
-            )}
-            
-            {mediaInfo.frameRate && (
-              <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-lg bg-white flex items-center justify-center shadow-sm shrink-0">
-                  <Film className="w-4 h-4 text-slate-400" />
-                </div>
-                <div>
-                  <p className="text-[10px] text-slate-400">FPS</p>
-                  <p className="text-xs text-slate-700 font-medium">
-                    {mediaInfo.frameRate.toFixed(1)}
-                  </p>
-                </div>
-              </div>
-            )}
-            
-            {mediaInfo.bitrate && (
-              <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-lg bg-white flex items-center justify-center shadow-sm shrink-0">
-                  <Video className="w-4 h-4 text-slate-400" />
-                </div>
-                <div>
-                  <p className="text-[10px] text-slate-400">Bitrate</p>
-                  <p className="text-xs text-slate-700 font-medium">
-                    {mediaInfo.bitrate} kbps
-                  </p>
-                </div>
-              </div>
-            )}
-            
-            {mediaInfo.audioSampleRate && (
-              <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-lg bg-white flex items-center justify-center shadow-sm shrink-0">
-                  <Volume2 className="w-4 h-4 text-slate-400" />
-                </div>
-                <div>
-                  <p className="text-[10px] text-slate-400">Sample Rate</p>
-                  <p className="text-xs text-slate-700 font-medium">
-                    {(mediaInfo.audioSampleRate / 1000).toFixed(1)} kHz
-                  </p>
-                </div>
-              </div>
-            )}
-          </div>
-        )}
 
         <div className="flex items-center gap-2 pt-3 border-t border-slate-100">
           <span className="inline-flex items-center px-2.5 py-1 rounded-lg bg-[#376BFC]/10 text-[#376BFC] text-xs font-medium">
             WebM
           </span>
-          {mediaInfo?.videoCodec && (
-            <span className="inline-flex items-center px-2.5 py-1 rounded-lg bg-slate-100 text-slate-600 text-xs font-medium">
-              {mediaInfo.videoCodec.toUpperCase()}
-            </span>
-          )}
         </div>
       </div>
     </div>
