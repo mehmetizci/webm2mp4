@@ -309,11 +309,11 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
       console.error('[FFmpeg] Load error:', err);
       const { message, stack } = normalizeError(err);
       
-      addLog?.('error', 'Load', `LOAD_FAILED: ${message}`, { stack });
+      addLog?.('error', 'Load', `LOAD_FAILED: ${message}`, { stack, originalError: err });
       updateDebugInfo?.({ 
         ffmpegLoadStatus: 'error',
         errorCode: 'FFMPEG_LOAD_ERROR',
-        errorMessage: `FFmpeg yüklenemedi: ${message}`,
+        errorMessage: message,
         errorStack: stack,
       });
       
@@ -334,10 +334,11 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
       const errorObj: ConversionError = {
         code: errorCode,
         message: errorMessage,
-        technical: message,
+        technical: `ffmpeg.load() başarısız\nURLs: /ffmpeg/ffmpeg-core.js, /ffmpeg/ffmpeg-core.wasm\n${message}\nStack: ${stack || 'yok'}`,
       };
       setError(errorObj);
       updateProgress(0, 'error', false);
+      throw err; // Re-throw ORIGINAL error
     } finally {
       clearTimeout(loadTimeout);
       setIsLoading(false);
@@ -369,40 +370,60 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
   ): Promise<ConversionResult> => {
     const ffmpeg = ffmpegRef.current;
     if (!ffmpeg) {
-      const err = new Error('FFmpeg henüz yüklenmedi');
-      addLog?.('error', 'Convert', `HATA: ${err.message}`, { stack: err.stack });
-      updateDebugInfo?.({ errorMessage: err.message, errorStack: err.stack });
+      const err = new Error('FFmpeg henüz yüklenmedi - ffmpegRef.current is null');
+      addLog?.('error', 'Convert', `HATA: FFmpeg nesnesi mevcut değil`, { 
+        stack: err.stack,
+        details: 'ffmpegRef.current is null - FFmpeg load() was not called or failed'
+      });
+      updateDebugInfo?.({ 
+        errorMessage: 'FFmpeg nesnesi mevcut değil',
+        errorStack: err.stack 
+      });
       const errorObj: ConversionError = {
         code: 'FFMPEG_NOT_LOADED',
         message: 'FFmpeg henüz yüklenmedi.',
-        technical: err.message,
+        technical: `ffmpegRef.current is null\n${err.stack || ''}`,
       };
       setError(errorObj);
+      onStageChange?.('error');
       throw err;
     }
 
     const validation = encoderValidationRef.current;
     if (!validation) {
-      const err = new Error('Dönüştürücü hazır değil');
-      addLog?.('error', 'Convert', `HATA: ${err.message}`, { stack: err.stack });
-      updateDebugInfo?.({ errorMessage: err.message, errorStack: err.stack });
+      const err = new Error('Encoder doğrulaması yapılmadı - encoderValidationRef.current is null');
+      addLog?.('error', 'Convert', `HATA: Encoder doğrulaması yapılmadı`, { 
+        stack: err.stack,
+        details: 'encoderValidationRef.current is null - encoders were not checked'
+      });
+      updateDebugInfo?.({ 
+        errorMessage: 'Encoder doğrulaması yapılmadı',
+        errorStack: err.stack 
+      });
       const errorObj: ConversionError = {
         code: 'ENCODER_NOT_VALIDATED',
         message: 'Dönüştürücü hazır değil.',
-        technical: err.message,
+        technical: `encoderValidationRef.current is null\n${err.stack || ''}`,
       };
       setError(errorObj);
+      onStageChange?.('error');
       throw err;
     }
 
     if (!validation.h264) {
-      const err = new Error('H264_NOT_FOUND');
-      addLog?.('error', 'Convert', `HATA: H.264 encoder mevcut değil`, { stack: err.stack });
-      updateDebugInfo?.({ errorMessage: 'H.264 encoder mevcut değil', errorStack: err.stack });
+      const err = new Error('H.264 encoder mevcut değil - validation.h264 = false');
+      addLog?.('error', 'Convert', `HATA: H.264 encoder mevcut değil`, { 
+        stack: err.stack,
+        details: { validation }
+      });
+      updateDebugInfo?.({ 
+        errorMessage: 'H.264 encoder mevcut değil',
+        errorStack: err.stack 
+      });
       const errorObj: ConversionError = {
         code: 'H264_ENCODER_UNAVAILABLE',
         message: 'Bu tarayıcıda gerekli H.264 dönüştürücü yüklenemedi. Lütfen sayfayı yenileyerek tekrar deneyin.',
-        technical: err.message,
+        technical: `H.264 encoder not found in FFmpeg\nvalidation.h264 = ${validation.h264}\nvalidation.aac = ${validation.aac}\n${err.stack || ''}`,
       };
       setError(errorObj);
       onStageChange?.('error');
@@ -437,20 +458,22 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
       updateDebugInfo?.({ fileSize: fileData.byteLength });
     } catch (err) {
       const { message, stack } = normalizeError(err);
-      addLog?.('error', 'Convert', `FILE_READ_FAILED: ${message}`, { stack });
-      updateDebugInfo?.({ errorMessage: `Dosya okunamadı: ${message}`, errorStack: stack });
+      addLog?.('error', 'Convert', `FILE_READ_FAILED: ${message}`, { stack, originalError: err });
+      updateDebugInfo?.({ 
+        errorMessage: `Dosya okunamadı: ${message}`, 
+        errorStack: stack 
+      });
       const errorObj: ConversionError = {
         code: 'FILE_READ_ERROR',
         message: 'Video dosyası okunamadı.',
-        technical: message,
+        technical: `file.arrayBuffer() başarısız\n${message}\nStack: ${stack || 'yok'}`,
       };
       setError(errorObj);
       onStageChange?.('error');
-      throw err;
+      throw err; // Re-throw ORIGINAL error
     }
 
     // Step 2: Write file to FFmpeg VFS
-    updateDebugInfo?.({ fileWriteStatus: 'writing' });
     addLog?.('info', 'Convert', `WRITE_FILE_STARTED: ${INPUT_FILE} (${fileData.byteLength} bytes)`);
     updateDebugInfo?.({ fileWriteStatus: 'writing' });
     
@@ -464,17 +487,21 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
       updateDebugInfo?.({ fileWriteStatus: 'error' });
       addLog?.('error', 'Convert', `WRITE_FILE_FAILED: ${message}`, { 
         stack,
+        originalError: err,
         details: { fileName: INPUT_FILE, dataLength: fileData.byteLength }
       });
-      updateDebugInfo?.({ errorMessage: `Dosya FFmpeg VFS'ye yazılamadı: ${message}`, errorStack: stack });
+      updateDebugInfo?.({ 
+        errorMessage: `Dosya FFmpeg VFS'ye yazılamadı: ${message}`, 
+        errorStack: stack 
+      });
       const errorObj: ConversionError = {
         code: 'WRITE_FILE_ERROR',
         message: 'Dosya FFmpeg VFS\'ye yazılamadı.',
-        technical: `${message}\nFile: ${INPUT_FILE}\nSize: ${fileData.byteLength} bytes`,
+        technical: `ffmpeg.writeFile("${INPUT_FILE}", ${fileData.byteLength} bytes) başarısız\n${message}\nFile: ${INPUT_FILE}\nSize: ${fileData.byteLength} bytes\nStack: ${stack || 'yok'}`,
       };
       setError(errorObj);
       onStageChange?.('error');
-      throw err;
+      throw err; // Re-throw ORIGINAL error with full context
     }
 
     // Step 3: Analyze media
@@ -488,29 +515,39 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
       addLog?.('success', 'Convert', `ANALYSIS_SUCCESS: ${mediaInfo.resolution || 'bilinmiyor'}, sesli: ${mediaInfo.hasAudio}`);
     } catch (err) {
       const { message, stack } = normalizeError(err);
-      addLog?.('error', 'Convert', `ANALYSIS_FAILED: ${message}`, { stack });
-      updateDebugInfo?.({ errorMessage: `Medya analizi başarısız: ${message}`, errorStack: stack });
+      addLog?.('error', 'Convert', `ANALYSIS_FAILED: ${message}`, { stack, originalError: err });
+      updateDebugInfo?.({ 
+        errorMessage: `Medya analizi başarısız: ${message}`, 
+        errorStack: stack 
+      });
       const errorObj: ConversionError = {
         code: 'ANALYSIS_ERROR',
         message: 'Medya analizi başarısız.',
-        technical: message,
+        technical: `parseMediaInfo() başarısız\n${message}\nStack: ${stack || 'yok'}`,
+      };
+      setError(errorObj);
+      onStageChange?.('error');
+      throw err; // Re-throw ORIGINAL error
+    }
+
+    if (mediaInfo.hasAudio && !validation.aac) {
+      const err = new Error('AAC encoder mevcut değil - video sesli');
+      addLog?.('error', 'Convert', `AAC_NOT_FOUND: ${err.message}`, { 
+        stack: err.stack,
+        details: { validation }
+      });
+      updateDebugInfo?.({ 
+        errorMessage: err.message,
+        errorStack: err.stack 
+      });
+      const errorObj: ConversionError = {
+        code: 'AAC_ENCODER_UNAVAILABLE',
+        message: 'Bu videoda ses var ancak AAC dönüştürücü yüklenemedi. Lütfen sayfayı yenileyerek tekrar deneyin.',
+        technical: `AAC encoder not available\nvalidation.aac = ${validation.aac}\nmediaInfo.hasAudio = ${mediaInfo.hasAudio}\n${err.stack || ''}`,
       };
       setError(errorObj);
       onStageChange?.('error');
       throw err;
-    }
-
-    if (mediaInfo.hasAudio && !validation.aac) {
-      addLog?.('error', 'Convert', `AAC_NOT_FOUND: Video sesli ancak AAC encoder mevcut değil`);
-      updateDebugInfo?.({ errorMessage: 'AAC encoder mevcut değil', errorStack: null });
-      const errorObj: ConversionError = {
-        code: 'AAC_ENCODER_UNAVAILABLE',
-        message: 'Bu videoda ses var ancak AAC dönüştürücü yüklenemedi. Lütfen sayfayı yenileyerek tekrar deneyin.',
-        technical: 'AAC encoder not available',
-      };
-      setError(errorObj);
-      onStageChange?.('error');
-      throw new Error('AAC_NOT_FOUND');
     }
 
     // Step 4: Execute FFmpeg
@@ -573,8 +610,11 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
       const { message, stack } = normalizeError(err);
       clearProgressTimeout();
       
-      addLog?.('error', 'Convert', `EXEC_FAILED: ${message}`, { stack });
-      updateDebugInfo?.({ errorMessage: `Dönüştürme başlatılamadı: ${message}`, errorStack: stack });
+      addLog?.('error', 'Convert', `EXEC_FAILED: ${message}`, { stack, originalError: err });
+      updateDebugInfo?.({ 
+        errorMessage: `Dönüştürme başlatılamadı: ${message}`, 
+        errorStack: stack 
+      });
       
       let errorMessage = 'Video dönüştürülürken bir sorun oluştu. Lütfen daha küçük bir dosyayla tekrar deneyin veya farklı bir tarayıcı kullanın.';
       let errorCode = 'CONVERSION_ERROR';
@@ -590,12 +630,12 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
       const errorObj: ConversionError = {
         code: errorCode,
         message: errorMessage,
-        technical: message,
+        technical: `ffmpeg.exec() başarısız\nKomut: ${ffmpegArgs.join(' ')}\n${message}\nhasReceivedProgress: ${hasReceivedProgress}\nStack: ${stack || 'yok'}`,
       };
       setError(errorObj);
       updateDebugInfo?.({ errorCode, errorMessage });
       onStageChange?.('error');
-      throw err;
+      throw err; // Re-throw ORIGINAL error
     }
     
     clearProgressTimeout();
@@ -620,16 +660,19 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
       addLog?.('success', 'Convert', `OUTPUT_READ_SUCCESS: ${outputData instanceof Uint8Array ? outputData.byteLength : 'bilinmiyor'} bytes`);
     } catch (err) {
       const { message, stack } = normalizeError(err);
-      addLog?.('error', 'Convert', `OUTPUT_READ_FAILED: ${message}`, { stack });
-      updateDebugInfo?.({ errorMessage: `MP4 dosyası okunamadı: ${message}`, errorStack: stack });
+      addLog?.('error', 'Convert', `OUTPUT_READ_FAILED: ${message}`, { stack, originalError: err });
+      updateDebugInfo?.({ 
+        errorMessage: `MP4 dosyası okunamadı: ${message}`, 
+        errorStack: stack 
+      });
       const errorObj: ConversionError = {
         code: 'OUTPUT_READ_ERROR',
         message: 'MP4 dosyası okunamadı.',
-        technical: message,
+        technical: `ffmpeg.readFile("${OUTPUT_FILE}") başarısız\n${message}\nStack: ${stack || 'yok'}`,
       };
       setError(errorObj);
       onStageChange?.('error');
-      throw err;
+      throw err; // Re-throw ORIGINAL error
     }
 
     onStageChange?.('complete');
