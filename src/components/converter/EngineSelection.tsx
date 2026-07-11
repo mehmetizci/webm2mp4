@@ -1,6 +1,6 @@
 'use client';
 
-import { Zap, Globe, AlertTriangle, CheckCircle, Loader2 } from 'lucide-react';
+import { Zap, Globe, AlertTriangle, CheckCircle, Loader2, RefreshCw } from 'lucide-react';
 import type { ConversionEngine, WebCodecsSupport } from '@/lib/converters/types';
 import { getReasonMessage } from '@/lib/converters/webCodecsSupport';
 
@@ -9,6 +9,7 @@ interface EngineSelectionProps {
   onEngineChange: (engine: ConversionEngine) => void;
   webCodecsSupport: WebCodecsSupport;
   disabled?: boolean;
+  onRetryDetection?: () => void;
 }
 
 export function EngineSelection({
@@ -16,6 +17,7 @@ export function EngineSelection({
   onEngineChange,
   webCodecsSupport,
   disabled = false,
+  onRetryDetection,
 }: EngineSelectionProps) {
   const handleSelect = (engine: ConversionEngine) => {
     if (disabled) return;
@@ -23,10 +25,25 @@ export function EngineSelection({
     onEngineChange(engine);
   };
 
+  const showRetryButton = !webCodecsSupport.checking && 
+    !webCodecsSupport.supported && 
+    onRetryDetection && 
+    !disabled;
+
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
         <p className="text-sm font-medium text-slate-700">Dönüşüm Yöntemi</p>
+        {showRetryButton && (
+          <button
+            onClick={onRetryDetection}
+            className="flex items-center gap-1 text-xs text-[#376BFC] hover:text-[#2858E0] transition-colors"
+            title="WebCodecs tespitini yeniden dene"
+          >
+            <RefreshCw className="w-3 h-3" />
+            Tekrar Test Et
+          </button>
+        )}
       </div>
       
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -55,8 +72,8 @@ export function EngineSelection({
           ) : (
             <div className="space-y-1.5">
               {webCodecsSupport.reason && (
-                <p className="text-amber-600 text-xs flex items-start gap-1.5">
-                  <AlertTriangle className="w-3 h-3 shrink-0 mt-0.5" />
+                <p className="text-slate-500 text-xs flex items-start gap-1.5">
+                  <AlertTriangle className="w-3 h-3 shrink-0 mt-0.5 text-amber-500" />
                   <span>{getReasonMessage(webCodecsSupport.reason)}</span>
                 </p>
               )}

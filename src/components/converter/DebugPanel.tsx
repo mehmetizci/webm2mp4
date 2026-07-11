@@ -190,23 +190,49 @@ export function DebugPanel({ debugInfo, isVisible }: DebugPanelProps) {
                   value={debugInfo.webCodecsVideoFrame ? 'Mevcut' : 'Yok'} 
                   status={debugInfo.webCodecsVideoFrame ? 'completed' : 'error'}
                 />
+                
+                {/* Individual Codec Test Results */}
+                {debugInfo.webCodecsCodecResults && debugInfo.webCodecsCodecResults.length > 0 && (
+                  <div className="mt-2 pt-2 border-t border-slate-200">
+                    <p className="text-xs text-slate-500 mb-1.5">Codec Test Sonuçları:</p>
+                    {debugInfo.webCodecsCodecResults.map((result, index) => (
+                      <DebugRow 
+                        key={index}
+                        label={result.codec}
+                        value={
+                          result.supported === null ? 'Test edilmedi' :
+                          result.supported ? 'Destekleniyor' : 'Desteklenmiyor'
+                        }
+                        status={
+                          result.supported === null ? 'idle' :
+                          result.supported ? 'completed' : undefined
+                        }
+                      />
+                    ))}
+                  </div>
+                )}
+                
+                {/* H.264 Status - neutral when not supported */}
                 <DebugRow 
                   label="H.264 Encoder" 
                   value={debugInfo.webCodecsH264Supported ? 'Destekleniyor' : 'Desteklenmiyor'} 
-                  status={debugInfo.webCodecsH264Supported ? 'completed' : 'error'}
+                  status={debugInfo.webCodecsH264Supported ? 'completed' : undefined}
                 />
-                {debugInfo.webCodecsTestedCodec && (
+                
+                {debugInfo.webCodecsTestedCodec && debugInfo.webCodecsH264Supported && (
                   <DebugRow 
                     label="Test Edilen Codec" 
                     value={debugInfo.webCodecsTestedCodec} 
                   />
                 )}
+                
                 {debugInfo.webCodecsHardwareAcceleration && (
                   <DebugRow 
                     label="Hardware Acceleration" 
                     value={debugInfo.webCodecsHardwareAcceleration} 
                   />
                 )}
+                
                 {debugInfo.webCodecsTimedOut && (
                   <DebugRow 
                     label="Timeout" 
@@ -214,6 +240,7 @@ export function DebugPanel({ debugInfo, isVisible }: DebugPanelProps) {
                     status="warning"
                   />
                 )}
+                
                 {debugInfo.webCodecsDetectionTimeMs !== null && (
                   <DebugRow 
                     label="Tespit Süresi" 
@@ -221,11 +248,12 @@ export function DebugPanel({ debugInfo, isVisible }: DebugPanelProps) {
                     status={debugInfo.webCodecsTimedOut ? 'warning' : undefined}
                   />
                 )}
+                
                 {debugInfo.webCodecsFailureDetails && (
                   <DebugRow 
                     label="Hata Detayı" 
                     value={debugInfo.webCodecsFailureDetails} 
-                    status="error"
+                    status={debugInfo.webCodecsTimedOut ? 'warning' : 'error'}
                   />
                 )}
               </>

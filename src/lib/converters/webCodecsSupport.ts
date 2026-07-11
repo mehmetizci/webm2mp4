@@ -1,8 +1,16 @@
-// WebCodecs Support Check with timeout and detailed logging
+// WebCodecs Support Check with detection IDs and stale result prevention
 
 import type { WebCodecsSupport, ConverterSupport, ConverterSupportReason } from './types';
 
+export interface CodecTestResult {
+  codec: string;
+  profile: string;
+  supported: boolean | null; // null = not tested yet
+  hardwareAcceleration: string | null;
+}
+
 export interface WebCodecsCapabilities {
+  detectionId: string;
   secureContext: boolean;
   videoEncoder: boolean;
   videoDecoder: boolean;
@@ -18,14 +26,21 @@ export interface WebCodecsCapabilities {
   errorDetails: string | null;
   detectionTimeMs: number | null;
   timedOut: boolean;
+  codecResults: CodecTestResult[];
 }
 
 // Timeout in milliseconds
 const DETECTION_TIMEOUT_MS = 3000;
 
-// Singleton to cache results (run detection only once)
+// Generate unique detection ID
+let globalDetectionCounter = 0;
 let cachedCapabilities: WebCodecsCapabilities | null = null;
-let detectionInProgress: Promise<WebCodecsCapabilities> | null = null;
+let currentDetectionId: string | null = null;
+
+function generateDetectionId(): string {
+  globalDetectionCounter++;
+  return `detection-${Date.now()}-${globalDetectionCounter}`;
+}
 
 function log(message: string, data?: unknown): void {
   console.log(`[WebCodecs] ${message}`, data ?? '');
@@ -46,7 +61,7 @@ function isBrowser(): boolean {
 // Check if we have a secure context (HTTPS or localhost)
 function isSecureContext(): boolean {
   if (!isBrowser()) return false;
-  return window.isSecureContext ?? true; // Default to true if not available
+  return window.isSecureContext ?? true;
 }
 
 // Detect available WebCodecs APIs
@@ -76,19 +91,19 @@ function detectWebCodecsAPIs(): {
   return result;
 }
 
-// Test codec support with timeout and logging
+// Test codec support
 async function testCodecSupport(
+  detectionId: string,
   codec: string,
-  profile?: string
-): Promise<{ supported: boolean; hardwareAcceleration: string | null }> {
+  profile: string
+): Promise<{ codec: string; profile: string; supported: boolean; hardwareAcceleration: string | null }> {
   if (!isBrowser() || typeof VideoEncoder === 'undefined') {
-    log(`testCodecSupport: VideoEncoder not available`);
-    return { supported: false, hardwareAcceleration: null };
+    log(`[${detectionId}] VideoEncoder not available`);
+    return { codec, profile, supported: false, hardwareAcceleration: null };
   }
 
   try {
-    const profileLabel = profile ? `${profile} profile` : 'default';
-    log(`Testing codec ${codec} (${profileLabel})...`);
+    log(`[${detectionId}] Testing ${codec} (${profile})...`);
 
     const config: VideoEncoderConfig = {
       codec,
@@ -99,47 +114,45 @@ async function testCodecSupport(
       hardwareAcceleration: 'prefer-hardware',
     };
 
-    if (profile && codec.startsWith('avc1')) {
+    if (codec.startsWith('avc1')) {
       (config as VideoEncoderConfig & { avc?: { format: string; profile?: string } }).avc = {
         format: 'avc',
-        profile,
+        profile: profile.toLowerCase(),
       };
     }
 
     const support = await VideoEncoder.isConfigSupported(config);
     const supported = Boolean(support.supported);
     
-    log(`Codec ${codec} (${profileLabel}): ${supported ? 'SUPPORTED' : 'NOT SUPPORTED'}`,
-      supported ? { hardwareAcceleration: support.config?.hardwareAcceleration } : null
-    );
+    log(`[${detectionId}] ${codec} (${profile}): ${supported ? 'SUPPORTED' : 'NOT SUPPORTED'}`);
     
     return {
+      codec,
+      profile,
       supported,
       hardwareAcceleration: (support.config as VideoEncoderConfig)?.hardwareAcceleration ?? null,
     };
   } catch (error) {
-    logError(`Codec ${codec} test failed:`, error);
-    return { supported: false, hardwareAcceleration: null };
+    logError(`[${detectionId}] ${codec} test failed:`, error);
+    return { codec, profile, supported: false, hardwareAcceleration: null };
   }
 }
 
-// Create timeout promise
-function createTimeout(ms: number): Promise<never> {
-  return new Promise((_, reject) => {
-    setTimeout(() => {
-      reject(new Error(`Detection timeout after ${ms}ms`));
-    }, ms);
-  });
-}
-
-// Get detailed capabilities report with timeout
-async function getWebCodecsCapabilitiesInternal(): Promise<WebCodecsCapabilities> {
+// Get detailed capabilities report
+async function getWebCodecsCapabilitiesInternal(detectionId: string): Promise<WebCodecsCapabilities> {
   const startTime = Date.now();
   
-  log('Detection started');
+  log(`[${detectionId}] Detection started`);
   
-  // Initialize with defaults
+  // Initialize codec results tracking
+  const codecResults: CodecTestResult[] = [
+    { codec: 'avc1.64001f', profile: 'High', supported: null, hardwareAcceleration: null },
+    { codec: 'avc1.42E01e', profile: 'Baseline', supported: null, hardwareAcceleration: null },
+    { codec: 'avc1.4D401f', profile: 'Main', supported: null, hardwareAcceleration: null },
+  ];
+
   const result: WebCodecsCapabilities = {
+    detectionId,
     secureContext: false,
     videoEncoder: false,
     videoDecoder: false,
@@ -155,6 +168,7 @@ async function getWebCodecsCapabilitiesInternal(): Promise<WebCodecsCapabilities
     errorDetails: null,
     detectionTimeMs: null,
     timedOut: false,
+    codecResults,
   };
 
   try {
@@ -162,31 +176,29 @@ async function getWebCodecsCapabilitiesInternal(): Promise<WebCodecsCapabilities
     if (!isBrowser()) {
       result.failureReason = 'NOT_IN_BROWSER';
       result.errorDetails = 'Function called outside browser environment';
-      logError('Not in browser environment');
+      logError(`[${detectionId}] Not in browser environment`);
       return result;
     }
 
     // Check secure context
     result.secureContext = isSecureContext();
-    log(`Secure context: ${result.secureContext}`);
+    log(`[${detectionId}] Secure context: ${result.secureContext}`);
     
     if (!result.secureContext) {
       result.failureReason = 'INSECURE_CONTEXT';
       result.errorDetails = 'WebCodecs requires HTTPS or localhost';
-      logError('Insecure context');
+      logError(`[${detectionId}] Insecure context`);
       return result;
     }
 
     // Detect WebCodecs APIs
-    log('Checking APIs...');
+    log(`[${detectionId}] Checking APIs...`);
     const apis = detectWebCodecsAPIs();
     result.videoEncoder = apis.videoEncoder;
     result.videoDecoder = apis.videoDecoder;
     result.videoFrame = apis.videoFrame;
-    
-    // Check MediaRecorder (for comparison)
     result.mediaRecorder = typeof MediaRecorder !== 'undefined';
-    log(`APIs: Encoder=${apis.videoEncoder}, Decoder=${apis.videoDecoder}, Frame=${apis.videoFrame}`);
+    log(`[${detectionId}] APIs: Encoder=${apis.videoEncoder}, Decoder=${apis.videoDecoder}, Frame=${apis.videoFrame}`);
 
     // Check if all required APIs are available
     if (!apis.videoEncoder || !apis.videoDecoder || !apis.videoFrame) {
@@ -197,83 +209,79 @@ async function getWebCodecsCapabilitiesInternal(): Promise<WebCodecsCapabilities
       
       result.failureReason = 'MISSING_APIS';
       result.errorDetails = `Missing APIs: ${missing.join(', ')}`;
-      logError(`Missing APIs: ${missing.join(', ')}`);
+      logError(`[${detectionId}] Missing APIs: ${missing.join(', ')}`);
       return result;
     }
 
-    // Test H.264 profiles
-    log('Starting codec tests...');
+    // Test all codec profiles and track results
+    log(`[${detectionId}] Starting codec tests...`);
     
-    // Test H.264 High Profile
-    log('Testing High Profile (avc1.64001f)...');
-    const highProfile = await testCodecSupport('avc1.64001f', 'high');
+    // Test High Profile
+    const highResult = await testCodecSupport(detectionId, 'avc1.64001f', 'High');
+    codecResults[0] = { 
+      codec: highResult.codec, 
+      profile: highResult.profile, 
+      supported: highResult.supported, 
+      hardwareAcceleration: highResult.hardwareAcceleration 
+    };
     
-    if (highProfile.supported) {
+    if (highResult.supported) {
       result.h264Supported = true;
       result.h264BaselineSupported = true;
-      result.hardwareAcceleration = highProfile.hardwareAcceleration ?? 'allowed';
-      result.failureReason = null;
-      result.errorDetails = null;
+      result.testedCodec = highResult.codec;
+      result.testedProfile = 'High';
+      result.hardwareAcceleration = highResult.hardwareAcceleration ?? 'allowed';
       result.detectionTimeMs = Date.now() - startTime;
-      log(`High Profile supported! Total time: ${result.detectionTimeMs}ms`);
+      log(`[${detectionId}] High Profile supported! Time: ${result.detectionTimeMs}ms`);
       return result;
     }
 
-    // Try Baseline Profile
-    log('Testing Baseline Profile (avc1.42E01e)...');
-    const baselineProfile = await testCodecSupport('avc1.42E01e', 'baseline');
+    // Test Baseline Profile
+    const baselineResult = await testCodecSupport(detectionId, 'avc1.42E01e', 'Baseline');
+    codecResults[1] = { 
+      codec: baselineResult.codec, 
+      profile: baselineResult.profile, 
+      supported: baselineResult.supported, 
+      hardwareAcceleration: baselineResult.hardwareAcceleration 
+    };
     
-    if (baselineProfile.supported) {
+    if (baselineResult.supported) {
       result.h264Supported = true;
       result.h264BaselineSupported = true;
-      result.testedCodec = 'avc1.42E01e';
+      result.testedCodec = baselineResult.codec;
       result.testedProfile = 'Baseline';
-      result.hardwareAcceleration = baselineProfile.hardwareAcceleration ?? 'allowed';
-      result.failureReason = null;
-      result.errorDetails = null;
+      result.hardwareAcceleration = baselineResult.hardwareAcceleration ?? 'allowed';
       result.detectionTimeMs = Date.now() - startTime;
-      log(`Baseline Profile supported! Total time: ${result.detectionTimeMs}ms`);
+      log(`[${detectionId}] Baseline Profile supported! Time: ${result.detectionTimeMs}ms`);
       return result;
     }
 
-    // Try Main Profile
-    log('Testing Main Profile (avc1.4D401f)...');
-    const mainProfile = await testCodecSupport('avc1.4D401f', 'main');
+    // Test Main Profile
+    const mainResult = await testCodecSupport(detectionId, 'avc1.4D401f', 'Main');
+    codecResults[2] = { 
+      codec: mainResult.codec, 
+      profile: mainResult.profile, 
+      supported: mainResult.supported, 
+      hardwareAcceleration: mainResult.hardwareAcceleration 
+    };
     
-    if (mainProfile.supported) {
+    if (mainResult.supported) {
       result.h264Supported = true;
       result.h264BaselineSupported = false;
-      result.testedCodec = 'avc1.4D401f';
+      result.testedCodec = mainResult.codec;
       result.testedProfile = 'Main';
-      result.hardwareAcceleration = mainProfile.hardwareAcceleration ?? 'allowed';
-      result.failureReason = null;
-      result.errorDetails = null;
+      result.hardwareAcceleration = mainResult.hardwareAcceleration ?? 'allowed';
       result.detectionTimeMs = Date.now() - startTime;
-      log(`Main Profile supported! Total time: ${result.detectionTimeMs}ms`);
+      log(`[${detectionId}] Main Profile supported! Time: ${result.detectionTimeMs}ms`);
       return result;
     }
 
-    // Try simple H.264 without specific profile
-    log('Testing default H.264...');
-    const simpleTest = await testCodecSupport('avc1.64001f');
-    
-    if (simpleTest.supported) {
-      result.h264Supported = true;
-      result.h264BaselineSupported = false;
-      result.hardwareAcceleration = simpleTest.hardwareAcceleration ?? 'allowed';
-      result.failureReason = null;
-      result.errorDetails = null;
-      result.detectionTimeMs = Date.now() - startTime;
-      log(`Default H.264 supported! Total time: ${result.detectionTimeMs}ms`);
-      return result;
-    }
-
-    // H.264 not supported
+    // H.264 not supported - all tested
     result.h264Supported = false;
     result.failureReason = 'H264_NOT_SUPPORTED';
     result.errorDetails = 'H.264 encoding is not supported by this browser/device';
     result.detectionTimeMs = Date.now() - startTime;
-    logError(`H.264 not supported. Total time: ${result.detectionTimeMs}ms`);
+    logError(`[${detectionId}] H.264 not supported. All codecs tested. Time: ${result.detectionTimeMs}ms`);
     return result;
     
   } catch (error) {
@@ -281,67 +289,130 @@ async function getWebCodecsCapabilitiesInternal(): Promise<WebCodecsCapabilities
     result.failureReason = 'DETECTION_ERROR';
     result.errorDetails = errorMessage;
     result.detectionTimeMs = Date.now() - startTime;
-    logError(`Detection failed: ${errorMessage}. Total time: ${result.detectionTimeMs}ms`);
+    logError(`[${detectionId}] Detection failed: ${errorMessage}. Time: ${result.detectionTimeMs}ms`);
     return result;
   }
 }
 
-// Get detailed capabilities report with timeout protection
-export async function getWebCodecsCapabilities(): Promise<WebCodecsCapabilities> {
-  // Return cached result if available
-  if (cachedCapabilities) {
-    log('Returning cached capabilities');
-    return cachedCapabilities;
-  }
-
-  // If detection is already in progress, wait for it
-  if (detectionInProgress) {
-    log('Waiting for detection in progress...');
-    return detectionInProgress;
-  }
-
-  // Start new detection with timeout
-  log(`Starting detection with ${DETECTION_TIMEOUT_MS}ms timeout...`);
-  
-  detectionInProgress = Promise.race([
-    getWebCodecsCapabilitiesInternal(),
-    createTimeout(DETECTION_TIMEOUT_MS).then(() => {
-      // Return timeout result
-      const result: WebCodecsCapabilities = {
-        secureContext: false,
-        videoEncoder: false,
-        videoDecoder: false,
-        videoFrame: false,
-        mediaRecorder: false,
-        h264Supported: false,
-        h264BaselineSupported: false,
-        testedCodec: 'avc1.64001f',
-        testedProfile: 'High',
-        testedLevel: '3.1',
-        hardwareAcceleration: 'unknown',
-        failureReason: 'TIMEOUT',
-        errorDetails: `WebCodecs detection timed out after ${DETECTION_TIMEOUT_MS}ms`,
-        detectionTimeMs: DETECTION_TIMEOUT_MS,
-        timedOut: true,
-      };
-      logError(`Detection TIMEOUT after ${DETECTION_TIMEOUT_MS}ms`);
-      return result;
-    }),
-  ]).finally(() => {
-    detectionInProgress = null;
+// Create timeout promise
+function createTimeout(ms: number): Promise<never> {
+  return new Promise((_, reject) => {
+    setTimeout(() => {
+      reject(new Error(`Detection timeout after ${ms}ms`));
+    }, ms);
   });
-
-  const result = await detectionInProgress;
-  cachedCapabilities = result;
-  log(`Detection complete. Time: ${result.detectionTimeMs}ms, Supported: ${result.h264Supported}`);
-  return result;
 }
 
-// Reset cache (for testing)
+// Get detailed capabilities report with timeout protection
+export async function getWebCodecsCapabilities(): Promise<WebCodecsCapabilities> {
+  const detectionId = generateDetectionId();
+  currentDetectionId = detectionId;
+  
+  log(`[${detectionId}] Starting detection with ${DETECTION_TIMEOUT_MS}ms timeout...`);
+  
+  // Race between detection and timeout
+  const detectionPromise = getWebCodecsCapabilitiesInternal(detectionId);
+  const timeoutPromise = createTimeout(DETECTION_TIMEOUT_MS);
+  
+  try {
+    // Use Promise.race but always return the detection result
+    const result = await Promise.race([
+      detectionPromise,
+      timeoutPromise.then(() => {
+        // This won't actually resolve, will be caught by race
+        throw new Error('Timeout');
+      }),
+    ]).catch((error) => {
+      // Check if this is our timeout or a real error
+      if (error.message.includes('Timeout')) {
+        logError(`[${detectionId}] Detection TIMEOUT after ${DETECTION_TIMEOUT_MS}ms`);
+        return {
+          detectionId,
+          secureContext: false,
+          videoEncoder: false,
+          videoDecoder: false,
+          videoFrame: false,
+          mediaRecorder: false,
+          h264Supported: false,
+          h264BaselineSupported: false,
+          testedCodec: 'avc1.64001f',
+          testedProfile: 'High',
+          testedLevel: '3.1',
+          hardwareAcceleration: 'unknown',
+          failureReason: 'TIMEOUT',
+          errorDetails: `WebCodecs detection timed out after ${DETECTION_TIMEOUT_MS}ms`,
+          detectionTimeMs: DETECTION_TIMEOUT_MS,
+          timedOut: true,
+          codecResults: [
+            { codec: 'avc1.64001f', profile: 'High', supported: null, hardwareAcceleration: null },
+            { codec: 'avc1.42E01e', profile: 'Baseline', supported: null, hardwareAcceleration: null },
+            { codec: 'avc1.4D401f', profile: 'Main', supported: null, hardwareAcceleration: null },
+          ],
+        } as WebCodecsCapabilities;
+      }
+      throw error;
+    });
+    
+    // Only cache successful results, not timeouts
+    if (!result.timedOut && result.failureReason !== 'TIMEOUT') {
+      cachedCapabilities = result;
+      log(`[${detectionId}] Cached successful result`);
+    } else {
+      log(`[${detectionId}] Timeout result NOT cached`);
+    }
+    
+    log(`[${detectionId}] Detection complete. Time: ${result.detectionTimeMs}ms, Supported: ${result.h264Supported}`);
+    return result;
+    
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    logError(`[${detectionId}] Detection error: ${errorMessage}`);
+    
+    return {
+      detectionId,
+      secureContext: false,
+      videoEncoder: false,
+      videoDecoder: false,
+      videoFrame: false,
+      mediaRecorder: false,
+      h264Supported: false,
+      h264BaselineSupported: false,
+      testedCodec: 'avc1.64001f',
+      testedProfile: 'High',
+      testedLevel: '3.1',
+      hardwareAcceleration: 'unknown',
+      failureReason: 'DETECTION_ERROR',
+      errorDetails: errorMessage,
+      detectionTimeMs: null,
+      timedOut: false,
+      codecResults: [
+        { codec: 'avc1.64001f', profile: 'High', supported: null, hardwareAcceleration: null },
+        { codec: 'avc1.42E01e', profile: 'Baseline', supported: null, hardwareAcceleration: null },
+        { codec: 'avc1.4D401f', profile: 'Main', supported: null, hardwareAcceleration: null },
+      ],
+    };
+  } finally {
+    if (currentDetectionId === detectionId) {
+      currentDetectionId = null;
+    }
+  }
+}
+
+// Check if detection is stale (another detection has started)
+export function isDetectionStale(detectionId: string): boolean {
+  return currentDetectionId !== null && currentDetectionId !== detectionId;
+}
+
+// Reset cache (for manual retry)
 export function resetWebCodecsCache(): void {
   cachedCapabilities = null;
-  detectionInProgress = null;
+  currentDetectionId = null;
   log('Cache reset');
+}
+
+// Get current detection ID
+export function getCurrentDetectionId(): string | null {
+  return currentDetectionId;
 }
 
 // Main function to check WebCodecs support
@@ -420,9 +491,9 @@ export function getFailureDescription(
     NOT_IN_BROWSER: 'Tarayıcı ortamında çalışmıyor',
     INSECURE_CONTEXT: 'WebCodecs için güvenli bağlantı (HTTPS) gerekli',
     MISSING_APIS: `Eksik API'ler: ${errorDetails || 'bilinmiyor'}`,
-    H264_NOT_SUPPORTED: `H.264 kodlama desteklenmiyor. ${errorDetails || ''}`,
-    TIMEOUT: `Tespit süresi aşıldı. ${errorDetails || ''}`,
-    DETECTION_ERROR: `Tespit hatası. ${errorDetails || ''}`,
+    H264_NOT_SUPPORTED: 'H.264 kodlama desteklenmiyor',
+    TIMEOUT: `Tespit süresi aşıldı (${DETECTION_TIMEOUT_MS}ms)`,
+    DETECTION_ERROR: `Tespit hatası: ${errorDetails || ''}`,
   };
 
   return descriptions[reason] || errorDetails || 'Bilinmeyen hata';

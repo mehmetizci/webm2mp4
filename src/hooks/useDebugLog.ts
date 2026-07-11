@@ -35,6 +35,7 @@ export interface ConversionDebugInfo {
   webCodecsHardwareAcceleration: string | null;
   webCodecsDetectionTimeMs: number | null;
   webCodecsTimedOut: boolean | null;
+  webCodecsCodecResults: Array<{ codec: string; profile: string; supported: boolean | null }>;
   // FFmpeg load status
   ffmpegLoadStatus: 'idle' | 'loading' | 'loaded' | 'error';
   coreJsLoadStatus: 'idle' | 'loading' | 'loaded' | 'error';
@@ -270,6 +271,7 @@ const initialDebugInfo: ConversionDebugInfo = {
   webCodecsHardwareAcceleration: null,
   webCodecsDetectionTimeMs: null,
   webCodecsTimedOut: null,
+  webCodecsCodecResults: [],
   // FFmpeg load status
   ffmpegLoadStatus: 'idle',
   coreJsLoadStatus: 'idle',
