@@ -207,7 +207,7 @@ export function WebmConverter() {
 
   if (browserCheck && !browserCheck.supported) {
     return (
-      <div className="w-full max-w-[720px] mx-auto px-4 py-8 space-y-6">
+      <div className="w-full max-w-[720px] mx-auto">
         <div className="bg-red-50 rounded-[10px] p-6 space-y-4 text-center">
           <div className="w-16 h-16 mx-auto rounded-full bg-red-100 flex items-center justify-center">
             <AlertTriangle className="w-8 h-8 text-red-500" />
@@ -230,21 +230,22 @@ export function WebmConverter() {
   const showMetadataError = metadataError && !conversionError;
 
   return (
-    <div className="w-full max-w-[720px] mx-auto px-4 py-8 space-y-6">
-      <div className="text-center space-y-3">
-        <h1 className="text-[32px] sm:text-[42px] font-semibold text-[#1F2937]">
+    <div className="w-full max-w-[720px] mx-auto">
+      <div className="text-center mb-6 px-5">
+        <h1 className="text-[32px] sm:text-[42px] font-bold text-[#1F2937] leading-[38px] sm:leading-[50px] tracking-tight">
           WebM Dosyan캇z캇 MP4&apos;e D철n체힊t체r체n
         </h1>
-        <p className="text-[#6B7280] text-sm sm:text-base max-w-md mx-auto">
+        <p className="text-[17px] leading-[26px] text-[#6B7280] max-w-[640px] mx-auto mt-3">
           WebM videonuzu y체kleyin, taray캇c캇n캇zda g체venli bir 힊ekilde MP4 format캇na d철n체힊t체r체n ve hemen indirin.
         </p>
-        <div className="flex items-center justify-center gap-2 text-xs text-[#6B7280]">
+        <div className="inline-flex items-center gap-2 mt-4 px-3 py-2 bg-[#ECFDF5] border border-[#10B981]/20 rounded-[10px]">
           <ShieldCheck className="w-4 h-4 text-[#10B981]" />
-          <span>Dosyan캇z cihaz캇n캇zdan ayr캇lmaz. D철n체힊체m tamamen taray캇c캇n캇zda ger챌ekle힊tirilir.</span>
+          <span className="text-[14px] text-[#065F46] leading-tight">Dosyan캇z cihaz캇n캇zdan ayr캇lmaz. D철n체힊체m tamamen taray캇c캇n캇zda ger챌ekle힊tirilir.</span>
         </div>
       </div>
 
-      <div className="bg-white rounded-[10px] shadow-sm border border-[#E5E7EB] p-4 sm:p-6 space-y-4">
+      <div className="mx-4 sm:mx-0">
+        <div className="bg-white rounded-[10px] border border-[#E5E7EB] p-5 sm:p-7 space-y-4">
         {showDropzone && (
           <FileDropzone onFileSelect={handleFileSelect} />
         )}
@@ -320,23 +321,27 @@ export function WebmConverter() {
           <DebugPanel debugInfo={debugInfo} isVisible={true} />
         )}
       </div>
+      </div>
 
-      <div className="bg-[#F9FAFB] rounded-[10px] p-4 space-y-3">
-        <h3 className="text-sm font-medium text-[#374151] flex items-center gap-2">
+      {/* Footer Info */}
+      <div className="mt-4 mx-4 sm:mx-0">
+        <div className="bg-white rounded-[10px] border border-[#E5E7EB] p-4 space-y-2">
+          <h3 className="text-[14px] font-medium text-[#374151] flex items-center gap-2">
           <ShieldCheck className="w-4 h-4 text-[#10B981]" />
           Videonuz g체vende
         </h3>
-        <p className="text-xs text-[#6B7280]">
+        <p className="text-[13px] text-[#6B7280]">
           Se챌ti휓iniz video herhangi bir sunucuya y체klenmez. T체m d철n체힊t체rme i힊lemi cihaz캇n캇z캇n taray캇c캇s캇nda ger챌ekle힊tirilir ve i힊lem tamamland캇휓캇nda ge챌ici veriler temizlenir.
         </p>
         <ul className="space-y-1">
           {['Sunucuya dosya y체klenmez', 'Video saklanmaz', '횥yelik gerekmez'].map((item) => (
-            <li key={item} className="flex items-center gap-2 text-xs text-[#6B7280]">
+            <li key={item} className="flex items-center gap-2 text-[13px] text-[#6B7280]">
               <span className="w-1.5 h-1.5 rounded-full bg-[#10B981]" />
               {item}
             </li>
           ))}
         </ul>
+        </div>
       </div>
     </div>
   );
