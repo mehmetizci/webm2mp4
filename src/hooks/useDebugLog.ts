@@ -48,6 +48,108 @@ function formatTimestamp(): string {
   });
 }
 
+// State mapping from log messages
+function extractStateFromLog(step: string, message: string, level: LogLevel): Partial<ConversionDebugInfo> | null {
+  const lowerMessage = message.toLowerCase();
+  const updates: Partial<ConversionDebugInfo> = {};
+
+  // Error handling - set all active states to error
+  if (level === 'error') {
+    if (lowerMessage.includes('ffmpeg')) {
+      updates.ffmpegLoadStatus = 'error';
+    }
+    if (lowerMessage.includes('wasm')) {
+      updates.wasmLoadStatus = 'error';
+    }
+    if (lowerMessage.includes('medya analizi') || lowerMessage.includes('media analysis')) {
+      updates.mediaAnalysisStatus = 'error';
+    }
+    if (lowerMessage.includes('encoder') || lowerMessage.includes('doğrulama')) {
+      updates.encoderValidationStatus = 'error';
+    }
+    if (lowerMessage.includes('write') || lowerMessage.includes('yazma') || lowerMessage.includes('dosya')) {
+      updates.fileWriteStatus = 'error';
+    }
+    return Object.keys(updates).length > 0 ? updates : null;
+  }
+
+  // FFmpeg / WASM loading states
+  if (step === 'FFmpeg' || step === 'CoreJS' || step === 'WASM') {
+    if (lowerMessage.includes('yükleniyor') || lowerMessage.includes('loading') || lowerMessage.includes('başlatılıyor')) {
+      if (step === 'CoreJS') updates.coreJsLoadStatus = 'loading';
+      if (step === 'WASM') updates.wasmLoadStatus = 'loading';
+      if (step === 'FFmpeg') updates.ffmpegLoadStatus = 'loading';
+    }
+    if (lowerMessage.includes('yüklendi') || lowerMessage.includes('loaded') || lowerMessage.includes('tamamlandı') || lowerMessage.includes('success')) {
+      if (step === 'CoreJS') updates.coreJsLoadStatus = 'loaded';
+      if (step === 'WASM') updates.wasmLoadStatus = 'loaded';
+      if (step === 'FFmpeg') updates.ffmpegLoadStatus = 'loaded';
+    }
+  }
+
+  // Media analysis states
+  if (step === 'Media') {
+    if (lowerMessage.includes('başlatılıyor') || lowerMessage.includes('starting') || lowerMessage.includes('analyzing')) {
+      updates.mediaAnalysisStatus = 'analyzing';
+    }
+    if (lowerMessage.includes('tamamlandı') || lowerMessage.includes('completed')) {
+      updates.mediaAnalysisStatus = 'completed';
+    }
+    if (lowerMessage.includes('hata') || lowerMessage.includes('error') || lowerMessage.includes('failed')) {
+      updates.mediaAnalysisStatus = 'error';
+    }
+  }
+
+  // Encoder validation states
+  if (step === 'Encoder' || lowerMessage.includes('encoder')) {
+    if (lowerMessage.includes('doğrulama') || lowerMessage.includes('validation') || lowerMessage.includes('validating')) {
+      updates.encoderValidationStatus = 'validating';
+    }
+    if (lowerMessage.includes('tamamlandı') || lowerMessage.includes('completed') || lowerMessage.includes('success')) {
+      updates.encoderValidationStatus = 'completed';
+    }
+    if (lowerMessage.includes('hata') || lowerMessage.includes('error') || lowerMessage.includes('failed')) {
+      updates.encoderValidationStatus = 'error';
+    }
+  }
+
+  // File write states
+  if (lowerMessage.includes('write_file') || lowerMessage.includes('yazma') || step === 'File') {
+    if (lowerMessage.includes('yazılıyor') || lowerMessage.includes('writing') || lowerMessage.includes('starting')) {
+      updates.fileWriteStatus = 'writing';
+    }
+    if (lowerMessage.includes('yazıldı') || lowerMessage.includes('written') || lowerMessage.includes('success')) {
+      updates.fileWriteStatus = 'written';
+    }
+    if (lowerMessage.includes('hata') || lowerMessage.includes('error') || lowerMessage.includes('failed')) {
+      updates.fileWriteStatus = 'error';
+    }
+  }
+
+  // General state updates from message content
+  // Core JS
+  if (lowerMessage.includes('core') && lowerMessage.includes('js')) {
+    if (lowerMessage.includes('yükleniyor') || lowerMessage.includes('loading')) {
+      updates.coreJsLoadStatus = 'loading';
+    }
+    if (lowerMessage.includes('yüklendi') || lowerMessage.includes('loaded') || lowerMessage.includes('tamamlandı')) {
+      updates.coreJsLoadStatus = 'loaded';
+    }
+  }
+
+  // WASM
+  if (lowerMessage.includes('wasm')) {
+    if (lowerMessage.includes('yükleniyor') || lowerMessage.includes('loading')) {
+      updates.wasmLoadStatus = 'loading';
+    }
+    if (lowerMessage.includes('yüklendi') || lowerMessage.includes('loaded') || lowerMessage.includes('tamamlandı')) {
+      updates.wasmLoadStatus = 'loaded';
+    }
+  }
+
+  return Object.keys(updates).length > 0 ? updates : null;
+}
+
 interface UseDebugLogReturn {
   debugInfo: ConversionDebugInfo;
   addLog: (level: LogLevel, step: string, message: string, details?: unknown) => void;
@@ -121,24 +223,31 @@ export function useDebugLog(): UseDebugLogReturn {
       details,
     };
 
+    // Extract state updates from the log
+    const stateUpdates = extractStateFromLog(step, message, level);
+
     setDebugInfo(prev => {
       const newLogs = [...prev.logs, entry];
       if (newLogs.length > MAX_LOG_ENTRIES) {
         newLogs.shift();
       }
-      return { ...prev, logs: newLogs };
-    });
 
-    // Also update last log lines for quick reference
-    if (level === 'info' && message.includes('[FFmpeg]')) {
-      setDebugInfo(prev => {
-        const newLastLines = [...prev.lastLogLines, message];
+      // Also update last log lines for quick reference
+      let newLastLines = prev.lastLogLines;
+      if (level === 'info' && (step === 'FFmpeg' || message.includes('[FFmpeg]'))) {
+        newLastLines = [...prev.lastLogLines, `[${step}] ${message}`];
         if (newLastLines.length > MAX_LOG_LINES) {
           newLastLines.shift();
         }
-        return { ...prev, lastLogLines: newLastLines };
-      });
-    }
+      }
+
+      return { 
+        ...prev, 
+        logs: newLogs,
+        lastLogLines: newLastLines,
+        ...stateUpdates,
+      };
+    });
   }, []);
 
   const updateDebugInfo = useCallback((updates: Partial<ConversionDebugInfo>) => {

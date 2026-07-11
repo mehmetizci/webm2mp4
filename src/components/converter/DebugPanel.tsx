@@ -1,8 +1,8 @@
 'use client';
 
-import { ChevronDown, ChevronUp, Bug, AlertTriangle, CheckCircle, XCircle, Info } from 'lucide-react';
+import { ChevronDown, ChevronUp, Bug, AlertTriangle, CheckCircle, XCircle, Info, Loader2 } from 'lucide-react';
 import { useState } from 'react';
-import type { ConversionDebugInfo, DebugLogEntry, LogLevel } from '@/hooks/useDebugLog';
+import type { ConversionDebugInfo, DebugLogEntry } from '@/hooks/useDebugLog';
 
 interface DebugPanelProps {
   debugInfo: ConversionDebugInfo;
@@ -36,11 +36,12 @@ function StatusBadge({ status }: { status: string }) {
       case 'analyzing':
       case 'validating':
       case 'writing':
-        return { icon: Info, color: 'text-blue-600 bg-blue-50', label: 'İşleniyor' };
+        return { icon: Loader2, color: 'text-blue-600 bg-blue-50', label: 'İşleniyor', animate: true };
       case 'error':
         return { icon: XCircle, color: 'text-red-600 bg-red-50', label: 'Hata' };
       default:
-        return { icon: Info, color: 'text-slate-600 bg-slate-50', label: 'Bekliyor' };
+        // Never show "idle" - show "Bekliyor" for initial state
+        return { icon: Info, color: 'text-slate-400 bg-slate-50', label: 'Bekliyor' };
     }
   };
 
@@ -49,7 +50,7 @@ function StatusBadge({ status }: { status: string }) {
 
   return (
     <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs ${config.color}`}>
-      <Icon className="w-3 h-3" />
+      <Icon className={`w-3 h-3 ${config.animate ? 'animate-spin' : ''}`} />
       {config.label}
     </span>
   );
