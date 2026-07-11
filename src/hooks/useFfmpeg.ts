@@ -272,12 +272,12 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
     }
   }, [isLoading, updateProgress, addLog, updateDebugInfo, normalizeError]);
 
-  // Calculate maxrate based on source resolution
-  const getMaxRateForResolution = (width: number | null): number => {
-    if (!width) return 600; // Default for unknown resolution
-    if (width <= 480) return 400; // 480p or smaller
-    if (width <= 720) return 600; // 720p
-    return 600; // 1080p+ - will be scaled to 720p
+  // Calculate maxrate based on source resolution and quality preset
+  const getMaxRateForResolution = (width: number | null, presetMaxRate: number): number => {
+    if (!width) return presetMaxRate; // Default to preset maxrate
+    if (width <= 480) return 400; // 480p or smaller - cap at 400k
+    if (width <= 720) return presetMaxRate; // 720p - use preset
+    return presetMaxRate; // 1080p+ - will be scaled to 720p, use preset
   };
 
   // Get scale filter for resolution
@@ -289,14 +289,15 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
 
   // Build FFmpeg arguments
   const buildFFmpegArgs = (
-    crf: number, 
+    crf: number,
+    maxRate: number,
     useFallback: boolean, 
     sourceWidth: number | null,
     sourceHeight: number | null
   ): string[] => {
     const mobile = isMobileDevice();
-    const maxRate = getMaxRateForResolution(sourceWidth);
-    const bufSize = maxRate * 2; // bufsize = 2x maxrate
+    const effectiveMaxRate = getMaxRateForResolution(sourceWidth, maxRate);
+    const bufSize = Math.ceil(effectiveMaxRate * 2); // bufsize = 2x maxrate
     const scaleFilter = getScaleFilter(sourceWidth);
 
     const args: string[] = [
@@ -319,7 +320,7 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
     if (videoFilters.length > 0) {
       args.push('-vf', videoFilters.join(','), '-fps_mode', 'cfr');
       if (useFallback) {
-        addLog?.('info', 'Convert', `Fallback komut (setpts filtresi), maxrate=${maxRate}k`);
+        addLog?.('info', 'Convert', `Fallback komut (setpts filtresi)`);
       }
     }
 
@@ -327,17 +328,17 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
     args.push(
       '-c:v', 'libx264',
       '-profile:v', 'high',
-      '-level', '3.1',
+      '-level:v', '3.1',
       '-preset', mobile ? 'ultrafast' : 'veryfast',
       '-crf', crf.toString(),
-      '-maxrate', `${maxRate}k`,
+      '-maxrate', `${effectiveMaxRate}k`,
       '-bufsize', `${bufSize}k`,
       '-pix_fmt', 'yuv420p',
       '-r', '30',
       '-threads', '1',
     );
 
-    // Audio encoding - optimized for mobile
+    // Audio encoding - only if source has audio (using -map 0:a?)
     args.push(
       '-c:a', 'aac',
       '-b:a', '96k',
@@ -347,7 +348,7 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
       OUTPUT_FILE,
     );
 
-    addLog?.('info', 'Convert', `FFmpeg profile: maxrate=${maxRate}k, bufsize=${bufSize}k, scale=${scaleFilter || 'none'}`);
+    addLog?.('info', 'Convert', `FFmpeg: CRF=${crf}, maxrate=${effectiveMaxRate}k, bufsize=${bufSize}k, scale=${scaleFilter || 'none'}`);
 
     return args;
   };
@@ -396,18 +397,19 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
       errorMessage: null,
     });
 
-    const crfMap: Record<QualityPreset, number> = {
-      high: 18,
-      balanced: 23,
-      small: 28,
+    // Get quality preset settings
+    const qualitySettingsMap: Record<QualityPreset, { crf: number; maxrate: number }> = {
+      standard: { crf: 28, maxrate: 650 },
+      high: { crf: 23, maxrate: 800 },
+      small: { crf: 28, maxrate: 400 },
     };
-    const crf = crfMap[quality];
+    const { crf, maxrate } = qualitySettingsMap[quality];
 
     const deviceMemory = getDeviceMemory();
     const cpuCores = getCPUCores();
     const mobile = isMobileDevice();
     addLog?.('info', 'Convert', `Cihaz: Hafıza=${deviceMemory || 'bilinmiyor'}GB, Çekirdek=${cpuCores}, Mobil=${mobile}`);
-    addLog?.('info', 'Convert', `Dosya boyutu: ${(file.size / (1024 * 1024)).toFixed(2)}MB, CRF=${crf}`);
+    addLog?.('info', 'Convert', `Dosya boyutu: ${(file.size / (1024 * 1024)).toFixed(2)}MB, CRF=${crf}, maxrate=${maxrate}k`);
 
     // Step 1: Read file
     onStageChange?.('reading');
@@ -463,7 +465,8 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
     updateDebugInfo?.({ ffmpegExecStatus: 'running', ffmpegExecStartTime: execStartTime });
 
     const ffmpegArgs = buildFFmpegArgs(
-      crf, 
+      crf,
+      maxrate,
       false, 
       sourceWidth ?? null, 
       sourceHeight ?? null
@@ -669,7 +672,8 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
         lastFFmpegMessageRef.current = '';
         
         const fallbackArgs = buildFFmpegArgs(
-          crf, 
+          crf,
+          maxrate,
           true, 
           sourceWidth ?? null, 
           sourceHeight ?? null

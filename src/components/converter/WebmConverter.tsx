@@ -68,7 +68,7 @@ export function WebmConverter() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [isConverting, setIsConverting] = useState(false);
   
-  const [settings, setSettings] = useState<SettingsType>({ quality: 'balanced' });
+  const [settings, setSettings] = useState<SettingsType>({ quality: 'standard' });
   const [result, setResult] = useState<ResultType | null>(null);
   const [conversionError, setConversionError] = useState<ErrorType | null>(null);
   const [stage, setStage] = useState<ConversionStage>('idle');

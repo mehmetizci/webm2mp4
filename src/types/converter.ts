@@ -41,7 +41,7 @@ export type ConversionStage =
   | 'complete'
   | 'error';
 
-export type QualityPreset = 'high' | 'balanced' | 'small';
+export type QualityPreset = 'standard' | 'high' | 'small';
 
 export interface ConversionSettings {
   quality: QualityPreset;
@@ -70,10 +70,25 @@ export interface ConversionError {
   technical?: string;
 }
 
-export const QUALITY_PRESETS: Record<QualityPreset, { crf: number; label: string }> = {
-  high: { crf: 18, label: 'Yüksek kalite' },
-  balanced: { crf: 23, label: 'Dengeli' },
-  small: { crf: 28, label: 'Küçük dosya' },
+export const QUALITY_PRESETS: Record<QualityPreset, { crf: number; maxrate: number; label: string; description: string }> = {
+  standard: { 
+    crf: 28, 
+    maxrate: 650, 
+    label: 'Standart', 
+    description: '720p, 650 kbps - Denged kalite ve dosya boyutu' 
+  },
+  high: { 
+    crf: 23, 
+    maxrate: 800, 
+    label: 'Yüksek', 
+    description: '720p, 800 kbps - Daha iyi kalite' 
+  },
+  small: { 
+    crf: 28, 
+    maxrate: 400, 
+    label: 'Küçük dosya', 
+    description: '720p, 400 kbps - En küçük dosya boyutu' 
+  },
 };
 
 export const STAGE_LABELS: Record<ConversionStage, string> = {
