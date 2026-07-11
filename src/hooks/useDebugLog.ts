@@ -47,13 +47,15 @@ export interface ConversionDebugInfo {
   averageSpeed: number | null;
   // Cleanup status
   cleanupStatus: 'idle' | 'cleaning' | 'completed' | 'warning' | 'error';
-  cleanupDetails: {
+  cleanupValidation: {
     inputDeleted: boolean;
     outputDeleted: boolean;
     listenersRemoved: boolean;
     timersCleared: boolean;
     workerTerminated: boolean;
+    errorDuringCleanup: string | null;
   } | null;
+  cleanupDuration: number | null;
   lastLogLines: string[];
   errorCode: string | null;
   errorMessage: string | null;
@@ -257,7 +259,8 @@ const initialDebugInfo: ConversionDebugInfo = {
   averageSpeed: null,
   // Cleanup status
   cleanupStatus: 'idle',
-  cleanupDetails: null,
+  cleanupValidation: null,
+  cleanupDuration: null,
   lastLogLines: [],
   errorCode: null,
   errorMessage: null,

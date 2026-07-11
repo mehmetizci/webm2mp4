@@ -173,100 +173,181 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
     }));
   }, []);
 
-  const cleanupFFmpegFiles = useCallback(async (ffmpeg: FFmpeg, fileName: string) => {
+  // Reentrant protection - prevents double cleanup
+  const cleanupInProgressRef = useRef(false);
+  
+  // Cleanup validation results
+  interface CleanupValidation {
+    inputDeleted: boolean;
+    outputDeleted: boolean;
+    listenersRemoved: boolean;
+    timersCleared: boolean;
+    workerTerminated: boolean;
+    errorDuringCleanup: string | null;
+  }
+
+  // Unified cleanup function - handles all cleanup in proper order
+  const cleanupResources = useCallback(async (options: {
+    terminateWorker: boolean;
+    reason?: string;
+  }): Promise<CleanupValidation> => {
+    const { terminateWorker, reason = 'Unknown' } = options;
+    
+    // Reentrant protection - prevent double cleanup
+    if (cleanupInProgressRef.current) {
+      addLog?.('info', 'Cleanup', 'Cleanup already in progress, skipping');
+      return {
+        inputDeleted: false,
+        outputDeleted: false,
+        listenersRemoved: false,
+        timersCleared: false,
+        workerTerminated: false,
+        errorDuringCleanup: 'cleanup_in_progress',
+      };
+    }
+    
+    cleanupInProgressRef.current = true;
+    const cleanupStartTime = Date.now();
+    
+    const validation: CleanupValidation = {
+      inputDeleted: false,
+      outputDeleted: false,
+      listenersRemoved: false,
+      timersCleared: false,
+      workerTerminated: false,
+      errorDuringCleanup: null,
+    };
+    
+    updateDebugInfo?.({ cleanupStatus: 'cleaning' });
+    addLog?.('info', 'Cleanup', `Starting cleanup: terminateWorker=${terminateWorker}, reason=${reason}`);
+    
     try {
-      await ffmpeg.deleteFile(fileName);
-      addLog?.('info', 'Cleanup', `${fileName} deleted`);
-      return true;
+      const ffmpeg = ffmpegRef.current;
+      
+      // Step 1: Clean VFS files FIRST (before terminate)
+      // Files must be deleted before worker is terminated
+      if (ffmpeg) {
+        try {
+          await ffmpeg.deleteFile(INPUT_FILE);
+          validation.inputDeleted = true;
+          addLog?.('info', 'Cleanup', 'Input file deleted');
+        } catch {
+          // File might not exist - this is OK
+          validation.inputDeleted = true; // Consider it cleaned
+        }
+        
+        try {
+          await ffmpeg.deleteFile(OUTPUT_FILE);
+          validation.outputDeleted = true;
+          addLog?.('info', 'Cleanup', 'Output file deleted');
+        } catch {
+          // File might not exist - this is OK
+          validation.outputDeleted = true; // Consider it cleaned
+        }
+      }
+      
+      // Step 2: Remove all listeners
+      try {
+        if (logHandlerRef.current && ffmpeg) {
+          ffmpeg.off('log', logHandlerRef.current);
+        }
+        if (progressHandlerRef.current && ffmpeg) {
+          ffmpeg.off('progress', progressHandlerRef.current);
+        }
+        logHandlerRef.current = null;
+        progressHandlerRef.current = null;
+        validation.listenersRemoved = true;
+        addLog?.('info', 'Cleanup', 'Listeners removed');
+      } catch (e) {
+        addLog?.('warning', 'Cleanup', `Listener removal error: ${e}`);
+      }
+      
+      // Step 3: Clear all timers
+      try {
+        clearAllTimeouts();
+        validation.timersCleared = true;
+        addLog?.('info', 'Cleanup', 'Timers cleared');
+      } catch (e) {
+        addLog?.('warning', 'Cleanup', `Timer clearing error: ${e}`);
+      }
+      
+      // Step 4: Terminate worker if needed (LAST step)
+      if (terminateWorker && ffmpeg) {
+        try {
+          ffmpeg.terminate();
+          validation.workerTerminated = true;
+          addLog?.('info', 'Cleanup', 'Worker terminated');
+        } catch (e) {
+          addLog?.('warning', 'Cleanup', `Worker terminate error: ${e}`);
+        }
+        
+        // Reset all state after terminate
+        ffmpegRef.current = null;
+        setIsLoaded(false);
+        setProgress({
+          percent: 0,
+          time: 0,
+          stage: 'idle',
+          hasProgress: false,
+          encodedTime: null,
+          encodingSpeed: null,
+        });
+        updateDebugInfo?.({
+          ffmpegExecStatus: 'error',
+          ffmpegLoadStatus: 'idle',
+        });
+      }
+      
+      // Clear file data reference
+      fileDataRef.current = null;
+      
+      // Calculate cleanup duration
+      const cleanupDuration = Date.now() - cleanupStartTime;
+      
+      // Update debug info with validation results
+      updateDebugInfo?.({
+        cleanupStatus: 'completed',
+        cleanupValidation: validation,
+        cleanupDuration,
+      });
+      
+      addLog?.('info', 'Cleanup', `Cleanup completed in ${cleanupDuration}ms`);
+      addLog?.('info', 'Cleanup', `Validation: input=${validation.inputDeleted}, output=${validation.outputDeleted}, listeners=${validation.listenersRemoved}, timers=${validation.timersCleared}, terminated=${validation.workerTerminated}`);
+      
+    } catch (e) {
+      const errorMessage = e instanceof Error ? e.message : String(e);
+      validation.errorDuringCleanup = errorMessage;
+      addLog?.('warning', 'Cleanup', `Cleanup error: ${errorMessage}`);
+      updateDebugInfo?.({
+        cleanupStatus: 'warning',
+        cleanupValidation: validation,
+      });
+    } finally {
+      cleanupInProgressRef.current = false;
+    }
+    
+    return validation;
+  }, [clearAllTimeouts, updateDebugInfo, addLog]);
+
+  // Pre-cleanup: Remove leftover files before new conversion
+  const preCleanup = useCallback(async () => {
+    const ffmpeg = ffmpegRef.current;
+    if (!ffmpeg) return;
+    
+    addLog?.('info', 'Cleanup', 'Pre-cleanup: checking for leftover files');
+    try {
+      await ffmpeg.deleteFile(INPUT_FILE);
+      addLog?.('info', 'Cleanup', 'Leftover input file removed');
     } catch {
-      // File didn't exist or already deleted - this is fine
-      addLog?.('info', 'Cleanup', `${fileName} already gone or not found`);
-      return false;
+      // File might not exist
+    }
+    try {
+      await ffmpeg.deleteFile(OUTPUT_FILE);
+      addLog?.('info', 'Cleanup', 'Leftover output file removed');
+    } catch {
+      // File might not exist
     }
   }, [addLog]);
-
-  const cleanupAllFiles = useCallback(async (ffmpeg: FFmpeg) => {
-    updateDebugInfo?.({ cleanupStatus: 'cleaning' });
-    let hasWarnings = false;
-    
-    const inputDeleted = await cleanupFFmpegFiles(ffmpeg, INPUT_FILE);
-    const outputDeleted = await cleanupFFmpegFiles(ffmpeg, OUTPUT_FILE);
-    
-    if (!inputDeleted || !outputDeleted) {
-      hasWarnings = true;
-    }
-    
-    updateDebugInfo?.({ 
-      cleanupStatus: hasWarnings ? 'warning' : 'completed',
-      fileWriteStatus: 'idle',
-    });
-    
-    return { inputDeleted, outputDeleted, hasWarnings };
-  }, [cleanupFFmpegFiles, updateDebugInfo]);
-
-  // Safe cleanup on error/cancel - terminates worker
-  const terminateAndCleanup = useCallback(async (ffmpeg: FFmpeg | null, reason: string) => {
-    addLog?.('warning', 'Cleanup', `Terminating worker: ${reason}`);
-    
-    // Clear all listeners first
-    if (logHandlerRef.current && ffmpeg) {
-      ffmpeg.off('log', logHandlerRef.current);
-      logHandlerRef.current = null;
-    }
-    if (progressHandlerRef.current && ffmpeg) {
-      ffmpeg.off('progress', progressHandlerRef.current);
-      progressHandlerRef.current = null;
-    }
-    
-    clearAllTimeouts();
-    
-    // Terminate worker
-    if (ffmpeg) {
-      try {
-        ffmpeg.terminate();
-      } catch {
-        // Ignore terminate errors
-      }
-    }
-    
-    ffmpegRef.current = null;
-    setIsLoaded(false);
-    
-    // Cleanup VFS files if FFmpeg is still accessible
-    if (ffmpeg) {
-      await cleanupAllFiles(ffmpeg);
-    }
-    
-    fileDataRef.current = null;
-    
-    updateDebugInfo?.({ 
-      ffmpegExecStatus: 'error',
-      cleanupStatus: 'completed',
-    });
-  }, [clearAllTimeouts, cleanupAllFiles, updateDebugInfo, addLog]);
-
-  // Cleanup on success - keeps worker alive
-  const performSuccessCleanup = useCallback(async (ffmpeg: FFmpeg) => {
-    updateDebugInfo?.({ cleanupStatus: 'cleaning' });
-    
-    // Remove listeners but keep worker alive
-    if (logHandlerRef.current) {
-      ffmpeg.off('log', logHandlerRef.current);
-      logHandlerRef.current = null;
-    }
-    if (progressHandlerRef.current) {
-      ffmpeg.off('progress', progressHandlerRef.current);
-      progressHandlerRef.current = null;
-    }
-    
-    clearAllTimeouts();
-    
-    // Clean up VFS files
-    await cleanupAllFiles(ffmpeg);
-    
-    fileDataRef.current = null;
-    updateDebugInfo?.({ cleanupStatus: 'completed' });
-  }, [clearAllTimeouts, cleanupAllFiles, updateDebugInfo]);
 
   const loadFFmpeg = useCallback(async (): Promise<boolean> => {
     if (ffmpegRef.current) {
@@ -459,7 +540,7 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
 
     // Pre-cleanup: Remove any leftover files from previous conversion
     addLog?.('info', 'Cleanup', 'Temizlik: önceki dosyalar kontrol ediliyor...');
-    await cleanupAllFiles(ffmpeg);
+    await preCleanup();
 
     // Store video duration for progress calculation
     videoDurationRef.current = videoDuration ?? null;
@@ -663,7 +744,7 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
 
     // Stall timeout - check every 10 seconds
     let stallCheckInterval: ReturnType<typeof setInterval> | null = null;
-    stallCheckInterval = setInterval(() => {
+    stallCheckInterval = setInterval(async () => {
       const timeSinceLastActivity = Date.now() - lastActivityRef.current;
       if (timeSinceLastActivity >= STALL_TIMEOUT_MS) {
         if (stallCheckInterval) {
@@ -673,7 +754,7 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
         addLog?.('error', 'Convert', `STALL_DETECTED: 90 saniye aktivite yok`);
         
         // Terminate and cleanup - this will handle the error state
-        terminateAndCleanup(ffmpeg, 'Stall timeout');
+        await cleanupResources({ terminateWorker: true, reason: 'Stall timeout' });
         
         const errorObj: ConversionError = {
           code: 'EXEC_STALLED',
@@ -688,7 +769,7 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
     }, 10000); // Check every 10 seconds
 
     // Safety timeout - 30 minutes absolute limit
-    safetyTimeoutRef.current = setTimeout(() => {
+    safetyTimeoutRef.current = setTimeout(async () => {
       if (stallCheckInterval) {
         clearInterval(stallCheckInterval);
         stallCheckInterval = null;
@@ -696,7 +777,7 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
       addLog?.('error', 'Convert', `SAFETY_TIMEOUT: 30 dakika aşıldı`);
       
       // Terminate and cleanup
-      terminateAndCleanup(ffmpeg, 'Safety timeout (30 min)');
+      await cleanupResources({ terminateWorker: true, reason: 'Safety timeout (30 min)' });
       
       const errorObj: ConversionError = {
         code: 'EXEC_SAFETY_TIMEOUT',
@@ -931,7 +1012,7 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
     conversionSucceeded = true;
 
     // Perform cleanup - keeps FFmpeg worker alive
-    await performSuccessCleanup(ffmpeg);
+    await cleanupResources({ terminateWorker: false, reason: 'Success' });
 
     return {
       blob,
@@ -947,7 +1028,7 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
       encodeTime,
       averageSpeed: averageSpeed ?? undefined,
     };
-  }, [updateProgress, clearAllTimeouts, addLog, updateDebugInfo, normalizeError, performSuccessCleanup, terminateAndCleanup, cleanupAllFiles]);
+  }, [updateProgress, clearAllTimeouts, addLog, updateDebugInfo, normalizeError, cleanupResources, preCleanup]);
 
   const terminate = useCallback(async (reason: string = 'User requested') => {
     const ffmpeg = ffmpegRef.current;

@@ -169,6 +169,50 @@ export function DebugPanel({ debugInfo, isVisible }: DebugPanelProps) {
             <DebugRow label="FFmpeg Dönüşüm" value={debugInfo.ffmpegExecStatus} status={debugInfo.ffmpegExecStatus} />
           </DebugSection>
 
+          {/* Cleanup Validation */}
+          {debugInfo.cleanupValidation && (
+            <DebugSection title="Cleanup Doğrulama">
+              <DebugRow 
+                label="Input Silindi" 
+                value={debugInfo.cleanupValidation.inputDeleted ? '✓' : '✗'} 
+                status={debugInfo.cleanupValidation.inputDeleted ? 'completed' : 'error'}
+              />
+              <DebugRow 
+                label="Output Silindi" 
+                value={debugInfo.cleanupValidation.outputDeleted ? '✓' : '✗'} 
+                status={debugInfo.cleanupValidation.outputDeleted ? 'completed' : 'error'}
+              />
+              <DebugRow 
+                label="Listeners Kaldırıldı" 
+                value={debugInfo.cleanupValidation.listenersRemoved ? '✓' : '✗'} 
+                status={debugInfo.cleanupValidation.listenersRemoved ? 'completed' : 'error'}
+              />
+              <DebugRow 
+                label="Timers Temizlendi" 
+                value={debugInfo.cleanupValidation.timersCleared ? '✓' : '✗'} 
+                status={debugInfo.cleanupValidation.timersCleared ? 'completed' : 'error'}
+              />
+              <DebugRow 
+                label="Worker Sonlandırıldı" 
+                value={debugInfo.cleanupValidation.workerTerminated ? '✓' : '-'} 
+                status={debugInfo.cleanupValidation.workerTerminated ? 'completed' : 'idle'}
+              />
+              {debugInfo.cleanupDuration !== null && (
+                <DebugRow 
+                  label="Cleanup Süresi" 
+                  value={`${debugInfo.cleanupDuration}ms`} 
+                />
+              )}
+              {debugInfo.cleanupValidation.errorDuringCleanup && (
+                <DebugRow 
+                  label="Cleanup Hatası" 
+                  value={debugInfo.cleanupValidation.errorDuringCleanup} 
+                  status="warning"
+                />
+              )}
+            </DebugSection>
+          )}
+
           {/* Execution Info */}
           <DebugSection title="Çalıştırma Bilgileri">
             <DebugRow 
