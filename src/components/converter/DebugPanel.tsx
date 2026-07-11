@@ -160,6 +160,34 @@ export function DebugPanel({ debugInfo, isVisible }: DebugPanelProps) {
             <DebugRow label="MIME Type" value={debugInfo.fileMimeType} />
           </DebugSection>
 
+          {/* Conversion Engine Info */}
+          <DebugSection title="Dönüşüm Motoru">
+            <DebugRow 
+              label="Seçilen Motor" 
+              value={debugInfo.selectedEngine === 'webcodecs' ? 'WebCodecs' : debugInfo.selectedEngine === 'ffmpeg' ? 'FFmpeg WebAssembly' : null} 
+            />
+            <DebugRow 
+              label="WebCodecs API Mevcut" 
+              value={debugInfo.webCodecsSupported ? 'Evet' : 'Hayır'} 
+              status={debugInfo.webCodecsSupported ? 'completed' : 'error'}
+            />
+            <DebugRow 
+              label="H.264 Encoder" 
+              value={debugInfo.webCodecsH264Supported === true ? 'Destekleniyor' : debugInfo.webCodecsH264Supported === false ? 'Desteklenmiyor' : null} 
+              status={debugInfo.webCodecsH264Supported === true ? 'completed' : debugInfo.webCodecsH264Supported === false ? 'error' : undefined}
+            />
+            {debugInfo.webCodecsHardwareAcceleration && (
+              <DebugRow 
+                label="Hardware Acceleration" 
+                value={debugInfo.webCodecsHardwareAcceleration} 
+              />
+            )}
+            <DebugRow 
+              label="Gerçekte Kullanılan Motor" 
+              value={debugInfo.actualEngineUsed === 'webcodecs' ? 'WebCodecs' : debugInfo.actualEngineUsed === 'ffmpeg' ? 'FFmpeg WebAssembly' : null} 
+            />
+          </DebugSection>
+
           {/* Conversion Status */}
           <DebugSection title="Dönüşüm Durumu">
             <DebugRow label="FFmpeg Yükleme" value={debugInfo.ffmpegLoadStatus} status={debugInfo.ffmpegLoadStatus} />

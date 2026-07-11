@@ -17,6 +17,14 @@ export interface ConversionDebugInfo {
   fileName: string | null;
   fileSize: number | null;
   fileMimeType: string | null;
+  // Conversion engine selection
+  selectedEngine: 'webcodecs' | 'ffmpeg' | null;
+  webCodecsSupported: boolean;
+  webCodecsSupportReason: string | null;
+  webCodecsH264Supported: boolean | null;
+  webCodecsHardwareAcceleration: string | null;
+  actualEngineUsed: 'webcodecs' | 'ffmpeg' | null;
+  // FFmpeg load status
   ffmpegLoadStatus: 'idle' | 'loading' | 'loaded' | 'error';
   coreJsLoadStatus: 'idle' | 'loading' | 'loaded' | 'error';
   wasmLoadStatus: 'idle' | 'loading' | 'loaded' | 'error';
@@ -233,6 +241,14 @@ const initialDebugInfo: ConversionDebugInfo = {
   fileName: null,
   fileSize: null,
   fileMimeType: null,
+  // Conversion engine selection
+  selectedEngine: null,
+  webCodecsSupported: false,
+  webCodecsSupportReason: null,
+  webCodecsH264Supported: null,
+  webCodecsHardwareAcceleration: null,
+  actualEngineUsed: null,
+  // FFmpeg load status
   ffmpegLoadStatus: 'idle',
   coreJsLoadStatus: 'idle',
   wasmLoadStatus: 'idle',

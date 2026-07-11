@@ -1,0 +1,168 @@
+'use client';
+
+import { Zap, Globe, AlertTriangle, CheckCircle, Loader2 } from 'lucide-react';
+import type { ConversionEngine, WebCodecsSupport } from '@/lib/converters/types';
+import { getReasonMessage } from '@/lib/converters/webCodecsSupport';
+
+interface EngineSelectionProps {
+  selectedEngine: ConversionEngine;
+  onEngineChange: (engine: ConversionEngine) => void;
+  webCodecsSupport: WebCodecsSupport;
+  disabled?: boolean;
+}
+
+export function EngineSelection({
+  selectedEngine,
+  onEngineChange,
+  webCodecsSupport,
+  disabled = false,
+}: EngineSelectionProps) {
+  const handleSelect = (engine: ConversionEngine) => {
+    if (disabled) return;
+    if (engine === 'webcodecs' && !webCodecsSupport.supported) return;
+    onEngineChange(engine);
+  };
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <p className="text-sm font-medium text-slate-700">Dönüşüm Yöntemi</p>
+      </div>
+      
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        {/* WebCodecs Option */}
+        <EngineCard
+          title="WebCodecs"
+          description="Desteklenen modern cihazlarda daha hızlı dönüşüm."
+          badge="Hızlı"
+          badgeColor="bg-emerald-100 text-emerald-700"
+          icon={<Zap className="w-5 h-5" />}
+          selected={selectedEngine === 'webcodecs'}
+          supported={webCodecsSupport.supported}
+          disabled={disabled}
+          onClick={() => handleSelect('webcodecs')}
+        >
+          {webCodecsSupport.checking ? (
+            <div className="flex items-center gap-2 text-slate-500 text-xs">
+              <Loader2 className="w-3 h-3 animate-spin" />
+              Kontrol ediliyor...
+            </div>
+          ) : webCodecsSupport.supported ? (
+            <div className="flex items-center gap-1.5 text-emerald-600 text-xs">
+              <CheckCircle className="w-3 h-3" />
+              Destekleniyor
+            </div>
+          ) : (
+            <div className="space-y-1.5">
+              {webCodecsSupport.reason && (
+                <p className="text-amber-600 text-xs flex items-start gap-1.5">
+                  <AlertTriangle className="w-3 h-3 shrink-0 mt-0.5" />
+                  <span>{getReasonMessage(webCodecsSupport.reason)}</span>
+                </p>
+              )}
+            </div>
+          )}
+        </EngineCard>
+
+        {/* FFmpeg Option */}
+        <EngineCard
+          title="FFmpeg WebAssembly"
+          description="Daha geniş tarayıcı ve codec uyumluluğu sunar."
+          badge="Uyumlu"
+          badgeColor="bg-blue-100 text-blue-700"
+          icon={<Globe className="w-5 h-5" />}
+          selected={selectedEngine === 'ffmpeg'}
+          supported={true}
+          disabled={disabled}
+          onClick={() => handleSelect('ffmpeg')}
+        >
+          <div className="flex items-center gap-1.5 text-emerald-600 text-xs">
+            <CheckCircle className="w-3 h-3" />
+            Destekleniyor
+          </div>
+        </EngineCard>
+      </div>
+    </div>
+  );
+}
+
+interface EngineCardProps {
+  title: string;
+  description: string;
+  badge: string;
+  badgeColor: string;
+  icon: React.ReactNode;
+  selected: boolean;
+  supported: boolean;
+  disabled: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}
+
+function EngineCard({
+  title,
+  description,
+  badge,
+  badgeColor,
+  icon,
+  selected,
+  supported,
+  disabled,
+  onClick,
+  children,
+}: EngineCardProps) {
+  const baseClasses = `
+    relative p-4 rounded-xl border-2 transition-all cursor-pointer
+    ${selected 
+      ? 'border-[#376BFC] bg-blue-50' 
+      : supported && !disabled
+        ? 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50'
+        : 'border-slate-200 bg-slate-50 opacity-60 cursor-not-allowed'
+    }
+  `;
+
+  return (
+    <button
+      type="button"
+      className={baseClasses}
+      onClick={onClick}
+      disabled={disabled || !supported}
+    >
+      {/* Header */}
+      <div className="flex items-start justify-between mb-2">
+        <div className="flex items-center gap-2">
+          <span className={selected ? 'text-[#376BFC]' : 'text-slate-600'}>
+            {icon}
+          </span>
+          <span className={`font-semibold text-sm ${selected ? 'text-[#376BFC]' : 'text-slate-800'}`}>
+            {title}
+          </span>
+        </div>
+        <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${badgeColor}`}>
+          {badge}
+        </span>
+      </div>
+
+      {/* Description */}
+      <p className="text-xs text-slate-500 mb-3 text-left">
+        {description}
+      </p>
+
+      {/* Status */}
+      <div className="text-left">
+        {children}
+      </div>
+
+      {/* Selected indicator */}
+      {selected && (
+        <div className="absolute top-2 right-2">
+          <div className="w-5 h-5 rounded-full bg-[#376BFC] flex items-center justify-center">
+            <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+            </svg>
+          </div>
+        </div>
+      )}
+    </button>
+  );
+}

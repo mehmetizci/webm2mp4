@@ -1,13 +1,15 @@
 'use client';
 
-import { CheckCircle, Download, RefreshCw, Film, ArrowDownCircle, Clock, Gauge } from 'lucide-react';
+import { CheckCircle, Download, RefreshCw, Film, ArrowDownCircle, Clock, Gauge, Zap, Globe } from 'lucide-react';
 import type { ConversionResult as ResultType } from '@/types/converter';
+import type { ConversionEngine } from '@/lib/converters/types';
 import { formatFileSize } from '@/lib/file-utils';
 import { formatTime } from '@/lib/format-utils';
 import { downloadBlob } from '@/lib/file-utils';
 
 interface ConversionResultProps {
   result: ResultType;
+  engine: ConversionEngine;
   onReset: () => void;
 }
 
@@ -26,10 +28,13 @@ function formatEncodeTime(seconds: number): string {
   return `${mins} dk ${secs} sn`;
 }
 
-export function ConversionResult({ result, onReset }: ConversionResultProps) {
+export function ConversionResult({ result, engine, onReset }: ConversionResultProps) {
   const handleDownload = () => {
     downloadBlob(result.blob, result.fileName);
   };
+
+  const engineLabel = engine === 'webcodecs' ? 'WebCodecs' : 'FFmpeg WebAssembly';
+  const EngineIcon = engine === 'webcodecs' ? Zap : Globe;
 
   return (
     <div className="flex flex-col items-center w-full min-h-[280px] sm:min-h-[320px] bg-emerald-50/50 rounded-2xl p-6 space-y-6">
@@ -51,6 +56,18 @@ export function ConversionResult({ result, onReset }: ConversionResultProps) {
             <span>{formatTime(result.duration)}</span>
           </div>
         </div>
+      </div>
+
+      {/* Engine Badge */}
+      <div className="flex items-center gap-2">
+        <span className="inline-flex items-center px-3 py-1.5 rounded-lg bg-blue-50 text-blue-700 text-xs font-medium">
+          <EngineIcon className="w-3.5 h-3.5 mr-1.5" />
+          {engineLabel}
+        </span>
+        <span className="inline-flex items-center px-3 py-1.5 rounded-lg bg-emerald-100 text-emerald-700 text-xs font-medium">
+          <Film className="w-3.5 h-3.5 mr-1.5" />
+          MP4
+        </span>
       </div>
 
       {/* Compression Stats */}
@@ -82,7 +99,7 @@ export function ConversionResult({ result, onReset }: ConversionResultProps) {
                 <div className="flex items-center justify-between text-xs">
                   <div className="flex items-center gap-1.5 text-slate-500">
                     <Clock className="w-3.5 h-3.5" />
-                    <span>Encode Time</span>
+                    <span>Dönüşüm Süresi</span>
                   </div>
                   <span className="font-mono text-slate-700">{formatEncodeTime(result.encodeTime)}</span>
                 </div>
@@ -91,7 +108,7 @@ export function ConversionResult({ result, onReset }: ConversionResultProps) {
                 <div className="flex items-center justify-between text-xs">
                   <div className="flex items-center gap-1.5 text-slate-500">
                     <Gauge className="w-3.5 h-3.5" />
-                    <span>Average Speed</span>
+                    <span>Ortalama Hız</span>
                   </div>
                   <span className="font-mono text-slate-700">{result.averageSpeed.toFixed(2)}x</span>
                 </div>
@@ -104,19 +121,19 @@ export function ConversionResult({ result, onReset }: ConversionResultProps) {
             <div className="pt-2 border-t border-slate-100 text-xs text-slate-500 space-y-1">
               {result.videoBitrate && (
                 <div className="flex justify-between">
-                  <span>Final Video Bitrate</span>
+                  <span>Video Bitrate</span>
                   <span className="font-mono text-slate-700">{result.videoBitrate.toFixed(0)} kbps</span>
                 </div>
               )}
               {result.audioBitrate && (
                 <div className="flex justify-between">
-                  <span>Final Audio Bitrate</span>
+                  <span>Ses Bitrate</span>
                   <span className="font-mono text-slate-700">{result.audioBitrate} kbps</span>
                 </div>
               )}
               {result.totalBitrate && (
                 <div className="flex justify-between">
-                  <span>Total Bitrate</span>
+                  <span>Toplam Bitrate</span>
                   <span className="font-mono text-slate-700">{result.totalBitrate.toFixed(0)} kbps</span>
                 </div>
               )}
@@ -124,13 +141,6 @@ export function ConversionResult({ result, onReset }: ConversionResultProps) {
           )}
         </div>
       )}
-
-      <div className="flex items-center gap-2">
-        <span className="inline-flex items-center px-3 py-1.5 rounded-lg bg-emerald-100 text-emerald-700 text-xs font-medium">
-          <Film className="w-3.5 h-3.5 mr-1.5" />
-          MP4
-        </span>
-      </div>
 
       <div className="flex flex-col sm:flex-row gap-3 w-full max-w-xs">
         <button

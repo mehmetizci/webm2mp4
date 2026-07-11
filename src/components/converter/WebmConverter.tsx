@@ -9,18 +9,24 @@ import { ConversionProgress } from './ConversionProgress';
 import { ConversionResult } from './ConversionResult';
 import { ConversionError } from './ConversionError';
 import { DebugPanel } from './DebugPanel';
+import { EngineSelection } from './EngineSelection';
+import { EngineFallback } from './EngineFallback';
 import { useVideoMetadataState } from '@/hooks/useVideoMetadata';
 import { useFfmpeg } from '@/hooks/useFfmpeg';
 import { useDebugLog } from '@/hooks/useDebugLog';
+import { checkWebCodecsSupport } from '@/lib/converters/webCodecsSupport';
 import type { 
   ConversionSettings as SettingsType, 
   ConversionStage,
   ConversionResult as ResultType,
   ConversionError as ErrorType,
 } from '@/types/converter';
+import type { ConversionEngine, WebCodecsSupport } from '@/lib/converters/types';
 
 // Type alias for WakeLockSentinel
 type WakeLockSentinelType = WakeLockSentinel;
+
+const STORAGE_KEY = 'webm2mp4-preferred-engine';
 
 function checkBrowserSupport(): { supported: boolean; message?: string } {
   if (typeof window === 'undefined') {
@@ -67,12 +73,22 @@ function validateFile(file: File): { valid: boolean; error?: string } {
 export function WebmConverter() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [isConverting, setIsConverting] = useState(false);
+  const [showFallbackPrompt, setShowFallbackPrompt] = useState(false);
+  const [fallbackError, setFallbackError] = useState<string | undefined>(undefined);
   
   const [settings, setSettings] = useState<SettingsType>({ quality: 'standard' });
   const [result, setResult] = useState<ResultType | null>(null);
   const [conversionError, setConversionError] = useState<ErrorType | null>(null);
   const [stage, setStage] = useState<ConversionStage>('idle');
   const [showLongLoading, setShowLongLoading] = useState(false);
+  
+  // Conversion engine state
+  const [conversionEngine, setConversionEngine] = useState<ConversionEngine>('ffmpeg');
+  const [webCodecsSupport, setWebCodecsSupport] = useState<WebCodecsSupport>({
+    checking: true,
+    supported: false,
+    reason: null,
+  });
 
   // Wake Lock ref to prevent screen from sleeping during conversion
   const wakeLockRef = useRef<WakeLockSentinelType | null>(null);
@@ -93,6 +109,44 @@ export function WebmConverter() {
   } = useFfmpeg({ addLog, updateDebugInfo });
 
   const { metadata, previewUrl, error: metadataError } = useVideoMetadataState(selectedFile);
+
+  // Check WebCodecs support on mount
+  useEffect(() => {
+    const checkSupport = async () => {
+      const support = await checkWebCodecsSupport();
+      setWebCodecsSupport(support);
+      
+      // Update debug info
+      updateDebugInfo({
+        webCodecsSupported: support.supported,
+        webCodecsSupportReason: support.reason,
+        webCodecsH264Supported: support.details?.h264Supported ?? null,
+        webCodecsHardwareAcceleration: support.details?.hardwareAcceleration ?? null,
+      });
+      
+      // Auto-select based on support and localStorage preference
+      if (support.supported) {
+        const savedEngine = localStorage.getItem(STORAGE_KEY);
+        if (savedEngine === 'webcodecs' || !savedEngine) {
+          setConversionEngine('webcodecs');
+          updateDebugInfo({ selectedEngine: 'webcodecs' });
+        }
+      } else {
+        setConversionEngine('ffmpeg');
+        updateDebugInfo({ selectedEngine: 'ffmpeg' });
+      }
+    };
+    
+    checkSupport();
+  }, [updateDebugInfo]);
+
+  // Save engine preference to localStorage
+  const handleEngineChange = useCallback((engine: ConversionEngine) => {
+    setConversionEngine(engine);
+    localStorage.setItem(STORAGE_KEY, engine);
+    updateDebugInfo({ selectedEngine: engine });
+    addLog('info', 'Engine', `Motor seçildi: ${engine}`);
+  }, [addLog, updateDebugInfo]);
 
   // Sync ffmpegError to conversionError
   useEffect(() => {
@@ -307,6 +361,24 @@ export function WebmConverter() {
     addLog('info', 'Reset', 'State reset, FFmpeg kept alive');
   }, [resetDebugInfo, addLog]);
 
+  const handleFallbackRetry = useCallback((engine: ConversionEngine) => {
+    setShowFallbackPrompt(false);
+    setFallbackError(undefined);
+    handleEngineChange(engine);
+    setConversionError(null);
+    setStage('idle');
+    setTimeout(() => {
+      if (selectedFile) {
+        handleConvert();
+      }
+    }, 100);
+  }, [handleEngineChange, selectedFile, handleConvert]);
+
+  const handleFallbackCancel = useCallback(() => {
+    setShowFallbackPrompt(false);
+    setFallbackError(undefined);
+  }, []);
+
   useEffect(() => {
     return () => {
       // Revoke Object URL on unmount
@@ -383,9 +455,16 @@ export function WebmConverter() {
               </p>
             </div>
             
-            <ConversionSettings
+            	            <ConversionSettings
               settings={settings}
               onSettingsChange={setSettings}
+            />
+
+            <EngineSelection
+              selectedEngine={conversionEngine}
+              onEngineChange={handleEngineChange}
+              webCodecsSupport={webCodecsSupport}
+              disabled={isConverting || ffmpegLoading}
             />
 
             <button
@@ -413,7 +492,7 @@ export function WebmConverter() {
         )}
 
         {showResult && (
-          <ConversionResult result={result} onReset={handleReset} />
+          <ConversionResult result={result} engine={conversionEngine} onReset={handleReset} />
         )}
 
         {showError && (
@@ -459,6 +538,15 @@ export function WebmConverter() {
           </div>
         </div>
       </div>
+
+      {/* Fallback Prompt */}
+      {showFallbackPrompt && (
+        <EngineFallback
+          onRetry={handleFallbackRetry}
+          onCancel={handleFallbackCancel}
+          error={fallbackError}
+        />
+      )}
     </div>
   );
 }
