@@ -232,7 +232,7 @@ export function WebmConverter() {
   return (
     <div className="w-full max-w-[720px] mx-auto px-4 py-8 space-y-6">
       <div className="text-center space-y-3">
-        <h1 className="text-2xl sm:text-3xl font-semibold text-[#1F2937]">
+        <h1 className="text-[32px] sm:text-[42px] font-semibold text-[#1F2937]">
           WebM Dosyan캇z캇 MP4&apos;e D철n체힊t체r체n
         </h1>
         <p className="text-[#6B7280] text-sm sm:text-base max-w-md mx-auto">
@@ -259,7 +259,7 @@ export function WebmConverter() {
             />
 
             {/* Output format info */}
-            <div className="bg-[#F3F4F6] rounded-[10px] p-3 text-xs space-y-1">
+            <div className="bg-[#F9FAFB] rounded-[10px] p-3 text-xs space-y-1">
               <p className="font-medium text-[#374151]">횉캇kt캇 Format캇: MP4</p>
               <p className="text-[#6B7280]">
                 Video: H.264 | Ses: AAC
