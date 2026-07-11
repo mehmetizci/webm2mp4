@@ -15,9 +15,8 @@ const INPUT_FILE = 'input.webm';
 const OUTPUT_FILE = 'output.mp4';
 
 // Timeout values
-const MOBILE_EXEC_TIMEOUT_MS = 180000; // 180 seconds for mobile
-const DESKTOP_EXEC_TIMEOUT_MS = 300000; // 300 seconds for desktop
-const STALL_TIMEOUT_MS = 90000; // 90 seconds stall detection
+const STALL_TIMEOUT_MS = 90000; // 90 seconds stall detection - activity-based
+const MAX_EXECUTION_TIME_MS = 30 * 60 * 1000; // 30 minutes absolute safety limit
 const DUPLICATE_FRAME_WARNING_THRESHOLD = 100;
 const DUPLICATE_FRAME_ABORT_THRESHOLD = 1000;
 
@@ -43,7 +42,8 @@ interface UseFfmpegReturn {
   convert: (
     file: File,
     quality: QualityPreset,
-    onStageChange?: (stage: ConversionStage) => void
+    onStageChange?: (stage: ConversionStage) => void,
+    videoDuration?: number | null
   ) => Promise<ConversionResult>;
   terminate: () => void;
 }
@@ -112,10 +112,12 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
   const fileDataRef = useRef<Uint8Array | null>(null);
   const logHandlerRef = useRef<((data: { message: string }) => void) | null>(null);
   const progressHandlerRef = useRef<((data: { progress: number }) => void) | null>(null);
-  const progressTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const stallTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const safetyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastActivityRef = useRef<number>(Date.now());
   const lastFFmpegMessageRef = useRef<string>('');
+  const lastEncodedTimeRef = useRef<number | null>(null);
+  const videoDurationRef = useRef<number | null>(null);
   
   const [isLoaded, setIsLoaded] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -124,6 +126,8 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
     time: 0,
     stage: 'idle',
     hasProgress: false,
+    encodedTime: null,
+    encodingSpeed: null,
   });
   const [error, setError] = useState<ConversionError | null>(null);
 
@@ -139,24 +143,32 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
   };
 
   const clearAllTimeouts = useCallback(() => {
-    if (progressTimeoutRef.current) {
-      clearTimeout(progressTimeoutRef.current);
-      progressTimeoutRef.current = null;
-    }
     if (stallTimeoutRef.current) {
       clearTimeout(stallTimeoutRef.current);
       stallTimeoutRef.current = null;
     }
+    if (safetyTimeoutRef.current) {
+      clearTimeout(safetyTimeoutRef.current);
+      safetyTimeoutRef.current = null;
+    }
   }, []);
 
-  const updateProgress = useCallback((percent: number, stage: ConversionStage, hasProgress = true) => {
+  const updateProgress = useCallback((
+    percent: number, 
+    stage: ConversionStage, 
+    hasProgress = true,
+    encodedTime?: number | null,
+    encodingSpeed?: number | null
+  ) => {
     const elapsed = (Date.now() - startTimeRef.current) / 1000;
-    setProgress({
+    setProgress(prev => ({
       percent: Math.min(Math.max(percent, 0), 100),
       time: elapsed,
       stage,
       hasProgress,
-    });
+      encodedTime: encodedTime !== undefined ? encodedTime : prev.encodedTime,
+      encodingSpeed: encodingSpeed !== undefined ? encodingSpeed : prev.encodingSpeed,
+    }));
   }, []);
 
   const cleanupFFmpegFiles = useCallback(async (ffmpeg: FFmpeg, fileName: string) => {
@@ -294,8 +306,15 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
   const convert = useCallback(async (
     file: File,
     quality: QualityPreset,
-    onStageChange?: (stage: ConversionStage) => void
+    onStageChange?: (stage: ConversionStage) => void,
+    videoDuration?: number | null
   ): Promise<ConversionResult> => {
+    // Store video duration for progress calculation
+    videoDurationRef.current = videoDuration ?? null;
+    if (videoDuration) {
+      addLog?.('info', 'Convert', `Video süresi: ${videoDuration.toFixed(2)} sn`);
+    }
+
     const ffmpeg = ffmpegRef.current;
     if (!ffmpeg) {
       const err = new Error('FFmpeg henüz yüklenmedi');
@@ -384,7 +403,7 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
   
     // Step 3: Execute FFmpeg
     onStageChange?.('converting');
-    updateProgress(10, 'converting', false);
+    updateProgress(10, 'converting', false, null, null);
     addLog?.('info', 'Convert', 'EXEC_STARTED');
     updateDebugInfo?.({ ffmpegExecStatus: 'running', ffmpegExecStartTime: Date.now() });
 
@@ -396,13 +415,24 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
     let hasRetriedWithFallback = false;
     let lastProgressPercent = 10;
 
+    // Calculate progress percentage based on encoded time and video duration
+    const calculateProgressPercent = (encodedTime: number | null): number => {
+      if (encodedTime === null || videoDurationRef.current === null || videoDurationRef.current <= 0) {
+        return lastProgressPercent;
+      }
+      const duration = videoDurationRef.current;
+      // Formula: start at 10%, end at 95%, scale encoded time to duration ratio
+      const ratio = Math.min(encodedTime / duration, 1);
+      return Math.min(95, Math.max(10, 10 + ratio * 85));
+    };
+
     // Progress handler
     progressHandlerRef.current = (data: { progress: number; time?: number }) => {
       lastActivityRef.current = Date.now();
       const normalizedProgress = data.progress;
       if (normalizedProgress > 0 && normalizedProgress <= 1) {
-        lastProgressPercent = 10 + Math.round(normalizedProgress * 85);
-        updateProgress(lastProgressPercent, 'converting', true);
+        lastProgressPercent = calculateProgressPercent(null);
+        updateProgress(lastProgressPercent, 'converting', true, null, null);
         updateDebugInfo?.({ lastProgressValue: lastProgressPercent });
       }
     };
@@ -417,6 +447,11 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
       
       const stats = parseFFmpegProgress(message);
       if (stats) {
+        // Update last encoded time reference
+        if (stats.encodedTime !== null) {
+          lastEncodedTimeRef.current = stats.encodedTime;
+        }
+
         updateDebugInfo?.({
           encodedFrame: stats.encodedFrame,
           encodedTime: stats.encodedTime,
@@ -435,10 +470,14 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
           }
         }
 
-        // Update progress from FFmpeg progress event (no duration info)
-        if (stats.encodedFrame !== null && stats.encodedFrame > 0) {
-          // Animate progress for unknown duration - show indeterminate animation
-          updateProgress(lastProgressPercent, 'converting', true);
+        // Update progress based on encoded time if we have video duration
+        if (stats.encodedTime !== null) {
+          lastProgressPercent = calculateProgressPercent(stats.encodedTime);
+          updateProgress(lastProgressPercent, 'converting', true, stats.encodedTime, stats.encodingSpeed);
+          updateDebugInfo?.({ lastProgressValue: lastProgressPercent });
+        } else if (stats.encodedFrame !== null && stats.encodedFrame > 0) {
+          // Fallback: animate progress for unknown duration
+          updateProgress(lastProgressPercent, 'converting', true, null, stats.encodingSpeed);
         }
       }
 
@@ -446,79 +485,85 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
     };
     ffmpeg.on('log', ffmpegLogHandler);
 
-    // Stall timeout
-    stallTimeoutRef.current = setTimeout(() => {
+    // Reset activity timer for execution
+    lastActivityRef.current = Date.now();
+    lastEncodedTimeRef.current = null;
+
+    // Stall timeout - check every 10 seconds
+    let stallCheckInterval: ReturnType<typeof setInterval> | null = null;
+    stallCheckInterval = setInterval(() => {
       const timeSinceLastActivity = Date.now() - lastActivityRef.current;
       if (timeSinceLastActivity >= STALL_TIMEOUT_MS) {
-        addLog?.('error', 'Convert', `EXEC_TIMEOUT: 90 saniye aktivite yok`);
+        if (stallCheckInterval) {
+          clearInterval(stallCheckInterval);
+        }
+        addLog?.('error', 'Convert', `STALL_DETECTED: 90 saniye aktivite yok`);
         updateDebugInfo?.({ ffmpegExecStatus: 'timeout' });
         
         ffmpeg.terminate();
-        ffmpegRef.current = null;
-        setIsLoaded(false);
         
         clearAllTimeouts();
-        ffmpeg.off('progress', progressHandlerRef.current!);
+        if (progressHandlerRef.current) {
+          ffmpeg.off('progress', progressHandlerRef.current);
+          progressHandlerRef.current = null;
+        }
         ffmpeg.off('log', ffmpegLogHandler);
-        progressHandlerRef.current = null;
         
         const errorObj: ConversionError = {
-          code: 'EXEC_TIMEOUT',
-          message: 'Dönüştürme cihazınızda yanıt vermedi.',
-          technical: `90 saniye boyunca aktivite yok`,
+          code: 'EXEC_STALLED',
+          message: 'Video dönüştürme işlemi yavaşladı veya durdu.',
+          technical: `90 saniye boyunca FFmpeg aktivitesi yok (frame=${lastEncodedTimeRef.current !== null ? 'encoded' : 'unknown'})`,
         };
         setError(errorObj);
-        updateDebugInfo?.({ errorCode: 'EXEC_TIMEOUT', errorMessage: errorObj.message });
+        updateDebugInfo?.({ errorCode: 'EXEC_STALLED', errorMessage: errorObj.message });
         onStageChange?.('error');
+        throw new Error('EXEC_STALLED');
       }
-    }, STALL_TIMEOUT_MS);
+    }, 10000); // Check every 10 seconds
 
-    const execTimeout = isMobileDevice() ? MOBILE_EXEC_TIMEOUT_MS : DESKTOP_EXEC_TIMEOUT_MS;
-
-    const execWithTimeout = async (args: string[]): Promise<void> => {
-      await Promise.race([
-        ffmpeg.exec(args),
-        new Promise<void>((_, reject) => {
-          progressTimeoutRef.current = setTimeout(() => {
-            reject(new Error('EXEC_TIMEOUT'));
-          }, execTimeout);
-        })
-      ]);
-    };
+    // Safety timeout - 30 minutes absolute limit
+    safetyTimeoutRef.current = setTimeout(() => {
+      if (stallCheckInterval) {
+        clearInterval(stallCheckInterval);
+        stallCheckInterval = null;
+      }
+      addLog?.('error', 'Convert', `SAFETY_TIMEOUT: 30 dakika aşıldı`);
+      updateDebugInfo?.({ ffmpegExecStatus: 'timeout' });
+      
+      ffmpeg.terminate();
+      
+      clearAllTimeouts();
+      if (progressHandlerRef.current) {
+        ffmpeg.off('progress', progressHandlerRef.current);
+        progressHandlerRef.current = null;
+      }
+      ffmpeg.off('log', ffmpegLogHandler);
+      
+      const errorObj: ConversionError = {
+        code: 'EXEC_SAFETY_TIMEOUT',
+        message: 'Video dönüştürme işlemi çok uzun sürdü.',
+        technical: `30 dakika güvenlik limiti aşıldı`,
+      };
+      setError(errorObj);
+      updateDebugInfo?.({ errorCode: 'EXEC_SAFETY_TIMEOUT', errorMessage: errorObj.message });
+      onStageChange?.('error');
+      throw new Error('EXEC_SAFETY_TIMEOUT');
+    }, MAX_EXECUTION_TIME_MS);
 
     let execSuccess = false;
     let execError: Error | null = null;
 
     try {
-      await execWithTimeout(ffmpegArgs);
-      clearTimeout(progressTimeoutRef.current!);
-      progressTimeoutRef.current = null;
+      await ffmpeg.exec(ffmpegArgs);
       execSuccess = true;
       addLog?.('success', 'Convert', 'EXEC_SUCCESS');
       updateDebugInfo?.({ ffmpegExecStatus: 'completed' });
     } catch (err) {
-      clearTimeout(progressTimeoutRef.current!);
-      progressTimeoutRef.current = null;
-      
       const { message } = normalizeError(err);
       execError = err instanceof Error ? err : new Error(message);
       
-      if (message === 'EXEC_TIMEOUT' || message.includes('timeout')) {
-        addLog?.('error', 'Convert', `EXEC_TIMEOUT: ${isMobileDevice() ? '180' : '300'} saniye`);
-        updateDebugInfo?.({ ffmpegExecStatus: 'timeout' });
-        
-        try { ffmpeg.terminate(); } catch { /* ignore */ }
-        ffmpegRef.current = null;
-        setIsLoaded(false);
-        
-        const errorObj: ConversionError = {
-          code: 'EXEC_TIMEOUT',
-          message: 'Dönüştürme cihazınızda yanıt vermedi.',
-          technical: `${isMobileDevice() ? '180' : '300'} saniye timeout`,
-        };
-        setError(errorObj);
-        updateDebugInfo?.({ errorCode: 'EXEC_TIMEOUT', errorMessage: errorObj.message });
-        onStageChange?.('error');
+      // Check if it's a stall or safety timeout (already handled)
+      if (message === 'EXEC_STALLED' || message === 'EXEC_SAFETY_TIMEOUT') {
         throw execError;
       }
       
@@ -527,10 +572,15 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
         hasRetriedWithFallback = true;
         addLog?.('warning', 'Convert', `Fallback: ${maxDuplicatedFrames} duplicate frame`);
         
-        ffmpeg.off('progress', progressHandlerRef.current!);
+        if (progressHandlerRef.current) {
+          ffmpeg.off('progress', progressHandlerRef.current);
+          progressHandlerRef.current = null;
+        }
         ffmpeg.off('log', ffmpegLogHandler);
-        progressHandlerRef.current = null;
+        
+        // Reset activity timer
         lastActivityRef.current = Date.now();
+        lastEncodedTimeRef.current = null;
         maxDuplicatedFrames = 0;
         hasWarnedAboutDuplicates = false;
         lastProgressPercent = 10;
@@ -543,7 +593,7 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
           lastActivityRef.current = Date.now();
           const normalizedProgress = data.progress;
           if (normalizedProgress > 0 && normalizedProgress <= 1) {
-            lastProgressPercent = 10 + Math.round(normalizedProgress * 85);
+            lastProgressPercent = calculateProgressPercent(null);
             updateProgress(lastProgressPercent, 'converting', true);
             updateDebugInfo?.({ lastProgressValue: lastProgressPercent });
           }
@@ -557,6 +607,9 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
           
           const stats = parseFFmpegProgress(message);
           if (stats) {
+            if (stats.encodedTime !== null) {
+              lastEncodedTimeRef.current = stats.encodedTime;
+            }
             updateDebugInfo?.({
               encodedFrame: stats.encodedFrame,
               encodedTime: stats.encodedTime,
@@ -567,35 +620,46 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
             if (stats.duplicatedFrames !== null && stats.duplicatedFrames > maxDuplicatedFrames) {
               maxDuplicatedFrames = stats.duplicatedFrames;
             }
+            if (stats.encodedTime !== null) {
+              lastProgressPercent = calculateProgressPercent(stats.encodedTime);
+              updateProgress(lastProgressPercent, 'converting', true, stats.encodedTime, stats.encodingSpeed);
+            }
           }
           addLog?.('info', 'FFmpeg', message);
         };
         ffmpeg.on('log', retryLogHandler);
         
         try {
-          await execWithTimeout(fallbackArgs);
-          clearTimeout(progressTimeoutRef.current!);
-          progressTimeoutRef.current = null;
+          await ffmpeg.exec(fallbackArgs);
           execSuccess = true;
           addLog?.('success', 'Convert', 'EXEC_SUCCESS (Fallback)');
           updateDebugInfo?.({ ffmpegExecStatus: 'completed' });
         } catch (retryErr) {
-          clearTimeout(progressTimeoutRef.current!);
-          progressTimeoutRef.current = null;
           const { message: retryMsg } = normalizeError(retryErr);
           execError = retryErr instanceof Error ? retryErr : new Error(retryMsg);
-          ffmpeg.off('progress', progressHandlerRef.current!);
+          if (progressHandlerRef.current) {
+            ffmpeg.off('progress', progressHandlerRef.current);
+            progressHandlerRef.current = null;
+          }
           ffmpeg.off('log', retryLogHandler);
         }
       }
     }
     
+    // Clean up timeouts and handlers
+    if (stallCheckInterval) {
+      clearInterval(stallCheckInterval);
+    }
     clearAllTimeouts();
-    ffmpeg.off('progress', progressHandlerRef.current!);
+    if (progressHandlerRef.current) {
+      ffmpeg.off('progress', progressHandlerRef.current);
+      progressHandlerRef.current = null;
+    }
     ffmpeg.off('log', ffmpegLogHandler);
-    progressHandlerRef.current = null;
 
     if (!execSuccess && execError) {
+      // Only set ffmpegExecStatus to error, NOT ffmpegLoadStatus
+      // FFmpeg may still be loaded even if execution fails
       updateDebugInfo?.({ ffmpegExecStatus: 'error' });
       
       const errorObj: ConversionError = {

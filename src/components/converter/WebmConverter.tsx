@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ShieldCheck, Video, Loader2, AlertTriangle, Lock } from 'lucide-react';
 import { FileDropzone } from './FileDropzone';
 import { FileDetails } from './FileDetails';
@@ -18,6 +18,9 @@ import type {
   ConversionResult as ResultType,
   ConversionError as ErrorType,
 } from '@/types/converter';
+
+// Type alias for WakeLockSentinel
+type WakeLockSentinelType = WakeLockSentinel;
 
 function checkBrowserSupport(): { supported: boolean; message?: string } {
   if (typeof window === 'undefined') {
@@ -71,6 +74,9 @@ export function WebmConverter() {
   const [stage, setStage] = useState<ConversionStage>('idle');
   const [showLongLoading, setShowLongLoading] = useState(false);
 
+  // Wake Lock ref to prevent screen from sleeping during conversion
+  const wakeLockRef = useRef<WakeLockSentinelType | null>(null);
+
   const { debugInfo, addLog, updateDebugInfo, resetDebugInfo, setFileInfo, startElapsedTimer, stopElapsedTimer } = useDebugLog();
 
   const { 
@@ -106,6 +112,60 @@ export function WebmConverter() {
       setShowLongLoading(false);
     }
   }, [ffmpegLoading, stage]);
+
+  // Wake Lock management - request on conversion start, release on end
+  const requestWakeLock = useCallback(async () => {
+    if (navigator.wakeLock && !wakeLockRef.current) {
+      try {
+        wakeLockRef.current = await navigator.wakeLock.request('screen');
+        addLog?.('info', 'System', 'Ekran uyanık tutuluyor');
+        
+        // Handle visibility change - re-acquire wake lock if page becomes visible again
+        wakeLockRef.current.addEventListener('release', () => {
+          addLog?.('info', 'System', 'Wake Lock serbest bırakıldı');
+        });
+      } catch (err) {
+        console.warn('[WakeLock] Request failed:', err);
+      }
+    }
+  }, [addLog]);
+
+  const releaseWakeLock = useCallback(async () => {
+    if (wakeLockRef.current) {
+      try {
+        await wakeLockRef.current.release();
+        wakeLockRef.current = null;
+        addLog?.('info', 'System', 'Wake Lock serbest bırakıldı');
+      } catch (err) {
+        console.warn('[WakeLock] Release failed:', err);
+        wakeLockRef.current = null;
+      }
+    }
+  }, [addLog]);
+
+  // Release wake lock when component unmounts or conversion ends
+  useEffect(() => {
+    return () => {
+      if (wakeLockRef.current) {
+        wakeLockRef.current.release().catch(() => {});
+        wakeLockRef.current = null;
+      }
+    };
+  }, []);
+
+  // Re-acquire wake lock when page becomes visible again during conversion
+  useEffect(() => {
+    const handleVisibilityChange = async () => {
+      if (document.visibilityState === 'visible' && isConverting && !wakeLockRef.current) {
+        await requestWakeLock();
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [isConverting, requestWakeLock]);
 
   const handleFileSelect = useCallback(async (file: File) => {
     // Simple validation
@@ -156,6 +216,9 @@ export function WebmConverter() {
     startElapsedTimer();
     addLog('info', 'Convert', 'Dönüştürme başlatıldı');
 
+    // Request wake lock to prevent screen from sleeping
+    await requestWakeLock();
+
     try {
       // FFmpeg yüklenmemişse yükle
       if (!ffmpegLoaded) {
@@ -172,7 +235,9 @@ export function WebmConverter() {
       }
 
       addLog('info', 'Convert', 'Dönüştürme başlatılıyor');
-      const convertResult = await convert(selectedFile, settings.quality, setStage);
+      // Pass video duration for accurate progress calculation
+      const videoDuration = metadata?.duration ?? null;
+      const convertResult = await convert(selectedFile, settings.quality, setStage, videoDuration);
       setResult(convertResult);
       addLog('success', 'Convert', 'Dönüştürme tamamlandı');
     } catch (err) {
@@ -193,9 +258,11 @@ export function WebmConverter() {
       setStage('error');
     } finally {
       setIsConverting(false);
+      // Release wake lock when conversion ends
+      await releaseWakeLock();
       stopElapsedTimer();
     }
-  }, [selectedFile, ffmpegLoaded, ffmpegError, loadFFmpeg, convert, settings.quality, resetDebugInfo, setFileInfo, startElapsedTimer, addLog, updateDebugInfo, stopElapsedTimer]);
+  }, [selectedFile, ffmpegLoaded, ffmpegError, loadFFmpeg, convert, settings.quality, metadata, resetDebugInfo, setFileInfo, startElapsedTimer, addLog, updateDebugInfo, stopElapsedTimer, requestWakeLock, releaseWakeLock]);
 
   const handleRetry = useCallback(() => {
     updateDebugInfo({ errorCode: null, errorMessage: null, errorStack: null });

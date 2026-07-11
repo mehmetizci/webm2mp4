@@ -27,6 +27,14 @@ export interface ConversionDebugInfo {
   ffmpegExecStatus: 'idle' | 'running' | 'completed' | 'error' | 'timeout';
   ffmpegExecStartTime: number | null;
   lastProgressValue: number | null;
+  // FFmpeg encoding stats
+  encodedFrame: number | null;
+  encodedTime: number | null;
+  encodingFps: number | null;
+  encodingSpeed: number | null;
+  duplicatedFrames: number | null;
+  // Output read status
+  outputReadStatus: 'idle' | 'reading' | 'read' | 'error';
   lastLogLines: string[];
   errorCode: string | null;
   errorMessage: string | null;
@@ -210,6 +218,14 @@ const initialDebugInfo: ConversionDebugInfo = {
   ffmpegExecStatus: 'idle',
   ffmpegExecStartTime: null,
   lastProgressValue: null,
+  // FFmpeg encoding stats
+  encodedFrame: null,
+  encodedTime: null,
+  encodingFps: null,
+  encodingSpeed: null,
+  duplicatedFrames: null,
+  // Output read status
+  outputReadStatus: 'idle',
   lastLogLines: [],
   errorCode: null,
   errorMessage: null,

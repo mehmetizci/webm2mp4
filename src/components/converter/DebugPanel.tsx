@@ -25,6 +25,17 @@ function formatTime(seconds: number): string {
   return `${secs} sn`;
 }
 
+function formatEncodedTime(seconds: number | null): string {
+  if (seconds === null) return '-';
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = (seconds % 60).toFixed(2);
+  if (h > 0) {
+    return `${h}:${m.toString().padStart(2, '0')}:${s.padStart(5, '0')}`;
+  }
+  return `${m}:${s.padStart(5, '0')}`;
+}
+
 function StatusBadge({ status }: { status: string }) {
   const getStatusConfig = () => {
     switch (status) {
@@ -167,6 +178,35 @@ export function DebugPanel({ debugInfo, isVisible }: DebugPanelProps) {
             <DebugRow label="Son Progress Değeri" value={debugInfo.lastProgressValue !== null ? `${debugInfo.lastProgressValue}%` : null} />
             <DebugRow label="Geçen Süre" value={formatTime(debugInfo.elapsedTime)} />
           </DebugSection>
+
+          {/* Encoding Stats */}
+          {(debugInfo.encodedTime !== null || debugInfo.encodingSpeed !== null) && (
+            <DebugSection title="Encoding İstatistikleri">
+              <DebugRow 
+                label="İşlenen Video Süresi" 
+                value={formatEncodedTime(debugInfo.encodedTime ?? null)} 
+              />
+              <DebugRow 
+                label="Encoding Hızı" 
+                value={debugInfo.encodingSpeed !== null ? `${debugInfo.encodingSpeed.toFixed(3)}x` : null} 
+              />
+              <DebugRow 
+                label="FPS" 
+                value={debugInfo.encodingFps !== null ? `${debugInfo.encodingFps.toFixed(1)}` : null} 
+              />
+              <DebugRow 
+                label="İşlenen Frame" 
+                value={debugInfo.encodedFrame !== null ? `${debugInfo.encodedFrame}` : null} 
+              />
+              {debugInfo.duplicatedFrames !== null && (
+                <DebugRow 
+                  label="Duplicate Frame" 
+                  value={`${debugInfo.duplicatedFrames}`} 
+                  status={debugInfo.duplicatedFrames > 100 ? 'warning' : undefined}
+                />
+              )}
+            </DebugSection>
+          )}
 
           {/* Error Info */}
           {(debugInfo.errorCode || debugInfo.errorMessage) && (
