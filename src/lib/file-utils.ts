@@ -20,10 +20,20 @@ export function getOutputFileName(inputFileName: string): string {
 }
 
 export function isValidWebMFile(file: File): boolean {
-  const validTypes = ['video/webm', 'video/x-matroska'];
-  const validExtension = /\.webm$/i;
-  
-  return validTypes.includes(file.type) || validExtension.test(file.name);
+  const fileName = file.name.toLowerCase().trim();
+  const hasWebmExtension = fileName.endsWith('.webm');
+
+  const supportedMimeTypes = [
+    'video/webm',
+    'video/x-webm',
+    'application/webm',
+    'application/octet-stream',
+  ];
+
+  const hasSupportedMimeType =
+    file.type === '' || supportedMimeTypes.includes(file.type.toLowerCase());
+
+  return hasWebmExtension && hasSupportedMimeType;
 }
 
 export function readFileAsArrayBuffer(file: File): Promise<ArrayBuffer> {
