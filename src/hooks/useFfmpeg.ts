@@ -72,6 +72,27 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
     return { message: String(err), stack: null };
   };
 
+  // Safely normalize FFmpeg progress value (can be time, ratio, or invalid)
+  const normalizeProgress = (rawProgress: unknown): number => {
+    const p = typeof rawProgress === 'number' ? rawProgress : 0;
+    
+    // If progress is a time value (large number like 30000), ignore it
+    // If progress is negative or invalid, ignore it
+    // If progress is > 1 (but not a time), treat as ratio
+    if (p < 0 || !isFinite(p)) {
+      return -1; // Invalid
+    }
+    
+    // If it's a very large number, it's likely a time value in seconds
+    // We can't use time directly without knowing total duration
+    if (p > 1) {
+      return -1; // Treat as invalid, don't update progress
+    }
+    
+    // Progress should be between 0 and 1
+    return Math.max(0, Math.min(1, p));
+  };
+
   const clearProgressTimeout = useCallback(() => {
     if (progressTimeoutRef.current) {
       clearTimeout(progressTimeoutRef.current);
@@ -599,16 +620,33 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
     updateDebugInfo?.({ ffmpegExecStartTime: Date.now() });
 
     // Set up progress handler
-    progressHandlerRef.current = ({ progress: p }) => {
+    progressHandlerRef.current = (data: { progress: number; time?: number }) => {
+      const p = data.progress;
+      const time = data.time;
+      
+      // Log raw values for debugging
+      console.log('[FFmpeg] Progress raw:', { progress: p, time });
+      
       if (!hasReceivedProgress) {
         hasReceivedProgress = true;
         clearProgressTimeout();
         console.log('[FFmpeg] First progress event received');
-        addLog?.('success', 'Convert', 'PROGRESS_RECEIVED: İlk progress olayı alındı');
+        addLog?.('success', 'Convert', `PROGRESS_RECEIVED: p=${p}, time=${time}`);
       }
-      const percent = 10 + Math.round(p * 85);
+      
+      // Safely normalize progress value
+      const normalizedProgress = normalizeProgress(p);
+      
+      // Skip update if progress is invalid (time value or negative)
+      if (normalizedProgress < 0) {
+        console.log('[FFmpeg] Progress ignored (invalid value):', p);
+        return;
+      }
+      
+      const percent = 10 + Math.round(normalizedProgress * 85);
+      console.log('[FFmpeg] Progress calculated:', percent, '% (from', p, ')');
       updateProgress(percent, 'converting', true);
-      updateDebugInfo?.({ lastProgressValue: percent });
+      updateDebugInfo?.({ lastProgressValue: percent, lastProgressRaw: p });
     };
     ffmpeg.on('progress', progressHandlerRef.current);
 
@@ -729,7 +767,7 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
       fileSize: blob.size,
       duration,
     };
-  }, [cleanupAllFiles, parseMediaInfo, updateProgress, clearProgressTimeout, addLog, updateDebugInfo, normalizeError]);
+  }, [cleanupAllFiles, parseMediaInfo, updateProgress, clearProgressTimeout, addLog, updateDebugInfo, normalizeError, normalizeProgress]);
 
   const terminate = useCallback(() => {
     clearProgressTimeout();
