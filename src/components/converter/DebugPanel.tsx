@@ -208,6 +208,46 @@ export function DebugPanel({ debugInfo, isVisible }: DebugPanelProps) {
             </DebugSection>
           )}
 
+          {/* Compression Stats */}
+          {debugInfo.outputSize !== null && (
+            <DebugSection title="Sıkıştırma Bilgileri">
+              <div className="space-y-2">
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-500">Giriş (Input)</span>
+                  <span className="text-slate-700 font-mono">{formatBytes(debugInfo.inputSize)}</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-500">Çıkış (Output)</span>
+                  <span className="text-slate-700 font-mono">{formatBytes(debugInfo.outputSize)}</span>
+                </div>
+                <div className="flex justify-between items-center bg-emerald-50 -mx-2 px-2 py-1 rounded-lg">
+                  <span className="text-emerald-700 font-medium">Sıkıştırma</span>
+                  <span className="text-emerald-700 font-bold font-mono">
+                    {debugInfo.compressionRatio !== null ? `${debugInfo.compressionRatio}%` : '-'}
+                  </span>
+                </div>
+              </div>
+            </DebugSection>
+          )}
+
+          {/* Bitrate Stats */}
+          {debugInfo.totalBitrate !== null && (
+            <DebugSection title="Bitrate Bilgileri">
+              <DebugRow 
+                label="Video Bitrate" 
+                value={debugInfo.videoBitrate !== null ? `${debugInfo.videoBitrate.toFixed(0)} kbps` : null} 
+              />
+              <DebugRow 
+                label="Ses Bitrate" 
+                value={debugInfo.audioBitrate !== null ? `${debugInfo.audioBitrate} kbps` : null} 
+              />
+              <DebugRow 
+                label="Toplam Bitrate" 
+                value={debugInfo.totalBitrate !== null ? `${debugInfo.totalBitrate.toFixed(0)} kbps` : null} 
+              />
+            </DebugSection>
+          )}
+
           {/* Error Info */}
           {(debugInfo.errorCode || debugInfo.errorMessage) && (
             <DebugSection title="Hata Bilgileri">

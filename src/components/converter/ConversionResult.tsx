@@ -1,6 +1,6 @@
 'use client';
 
-import { CheckCircle, Download, RefreshCw, Film } from 'lucide-react';
+import { CheckCircle, Download, RefreshCw, Film, ArrowDownCircle } from 'lucide-react';
 import type { ConversionResult as ResultType } from '@/types/converter';
 import { formatFileSize } from '@/lib/file-utils';
 import { formatTime } from '@/lib/format-utils';
@@ -9,6 +9,12 @@ import { downloadBlob } from '@/lib/file-utils';
 interface ConversionResultProps {
   result: ResultType;
   onReset: () => void;
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(2)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
 }
 
 export function ConversionResult({ result, onReset }: ConversionResultProps) {
@@ -37,6 +43,52 @@ export function ConversionResult({ result, onReset }: ConversionResultProps) {
           </div>
         </div>
       </div>
+
+      {/* Compression Stats */}
+      {result.inputSize > 0 && result.outputSize > 0 && (
+        <div className="w-full max-w-xs bg-white rounded-xl p-4 space-y-3">
+          <div className="flex items-center gap-2 text-sm font-medium text-slate-700">
+            <ArrowDownCircle className="w-4 h-4 text-emerald-600" />
+            Sıkıştırma Özeti
+          </div>
+          <div className="grid grid-cols-2 gap-4 text-xs">
+            <div className="space-y-1">
+              <span className="text-slate-500">Giriş</span>
+              <p className="font-mono text-slate-700">{formatBytes(result.inputSize)}</p>
+            </div>
+            <div className="space-y-1">
+              <span className="text-slate-500">Çıkış</span>
+              <p className="font-mono text-slate-700">{formatBytes(result.outputSize)}</p>
+            </div>
+          </div>
+          <div className="flex items-center justify-between pt-2 border-t border-slate-100">
+            <span className="text-sm font-medium text-emerald-700">Sıkıştırma</span>
+            <span className="text-lg font-bold text-emerald-700">{result.compressionRatio}%</span>
+          </div>
+          {(result.totalBitrate || result.videoBitrate) && (
+            <div className="pt-2 border-t border-slate-100 text-xs text-slate-500 space-y-1">
+              {result.videoBitrate && (
+                <div className="flex justify-between">
+                  <span>Video Bitrate</span>
+                  <span className="font-mono">{result.videoBitrate.toFixed(0)} kbps</span>
+                </div>
+              )}
+              {result.audioBitrate && (
+                <div className="flex justify-between">
+                  <span>Ses Bitrate</span>
+                  <span className="font-mono">{result.audioBitrate} kbps</span>
+                </div>
+              )}
+              {result.totalBitrate && (
+                <div className="flex justify-between">
+                  <span>Toplam Bitrate</span>
+                  <span className="font-mono">{result.totalBitrate.toFixed(0)} kbps</span>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="flex items-center gap-2">
         <span className="inline-flex items-center px-3 py-1.5 rounded-lg bg-emerald-100 text-emerald-700 text-xs font-medium">

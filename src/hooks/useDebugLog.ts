@@ -35,6 +35,13 @@ export interface ConversionDebugInfo {
   duplicatedFrames: number | null;
   // Output read status
   outputReadStatus: 'idle' | 'reading' | 'read' | 'error';
+  // Compression stats
+  inputSize: number | null;
+  outputSize: number | null;
+  compressionRatio: number | null;
+  videoBitrate: number | null;
+  audioBitrate: number | null;
+  totalBitrate: number | null;
   lastLogLines: string[];
   errorCode: string | null;
   errorMessage: string | null;
@@ -226,6 +233,13 @@ const initialDebugInfo: ConversionDebugInfo = {
   duplicatedFrames: null,
   // Output read status
   outputReadStatus: 'idle',
+  // Compression stats
+  inputSize: null,
+  outputSize: null,
+  compressionRatio: null,
+  videoBitrate: null,
+  audioBitrate: null,
+  totalBitrate: null,
   lastLogLines: [],
   errorCode: null,
   errorMessage: null,

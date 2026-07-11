@@ -43,7 +43,9 @@ interface UseFfmpegReturn {
     file: File,
     quality: QualityPreset,
     onStageChange?: (stage: ConversionStage) => void,
-    videoDuration?: number | null
+    videoDuration?: number | null,
+    sourceWidth?: number | null,
+    sourceHeight?: number | null
   ) => Promise<ConversionResult>;
   terminate: () => void;
 }
@@ -270,9 +272,33 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
     }
   }, [isLoading, updateProgress, addLog, updateDebugInfo, normalizeError]);
 
+  // Calculate maxrate based on source resolution
+  const getMaxRateForResolution = (width: number | null): number => {
+    if (!width) return 600; // Default for unknown resolution
+    if (width <= 480) return 400; // 480p or smaller
+    if (width <= 720) return 600; // 720p
+    return 600; // 1080p+ - will be scaled to 720p
+  };
+
+  // Get scale filter for resolution
+  const getScaleFilter = (sourceWidth: number | null): string | null => {
+    if (!sourceWidth) return null;
+    if (sourceWidth <= 720) return null; // No scaling needed
+    return 'scale=720:-2'; // Scale to 720px width, maintain aspect ratio
+  };
+
   // Build FFmpeg arguments
-  const buildFFmpegArgs = (crf: number, useFallback: boolean): string[] => {
+  const buildFFmpegArgs = (
+    crf: number, 
+    useFallback: boolean, 
+    sourceWidth: number | null,
+    sourceHeight: number | null
+  ): string[] => {
     const mobile = isMobileDevice();
+    const maxRate = getMaxRateForResolution(sourceWidth);
+    const bufSize = maxRate * 2; // bufsize = 2x maxrate
+    const scaleFilter = getScaleFilter(sourceWidth);
+
     const args: string[] = [
       '-fflags', '+genpts',
       '-i', INPUT_FILE,
@@ -280,25 +306,48 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
       '-map', '0:a?',
     ];
 
+    // Build video filter
+    const videoFilters: string[] = [];
+    if (scaleFilter) {
+      videoFilters.push(scaleFilter);
+    }
     if (useFallback) {
-      args.push('-vf', 'setpts=N/(30*TB),fps=30', '-fps_mode', 'cfr');
-      addLog?.('info', 'Convert', 'Fallback komut (setpts filtresi)');
-    } else {
-      args.push('-vf', 'fps=30', '-fps_mode', 'cfr');
+      videoFilters.push('setpts=N/(30*TB)');
+    }
+    videoFilters.push('fps=30');
+
+    if (videoFilters.length > 0) {
+      args.push('-vf', videoFilters.join(','), '-fps_mode', 'cfr');
+      if (useFallback) {
+        addLog?.('info', 'Convert', `Fallback komut (setpts filtresi), maxrate=${maxRate}k`);
+      }
     }
 
+    // Video encoding with constrained bitrate
     args.push(
       '-c:v', 'libx264',
+      '-profile:v', 'high',
+      '-level', '3.1',
       '-preset', mobile ? 'ultrafast' : 'veryfast',
       '-crf', crf.toString(),
+      '-maxrate', `${maxRate}k`,
+      '-bufsize', `${bufSize}k`,
       '-pix_fmt', 'yuv420p',
+      '-r', '30',
       '-threads', '1',
+    );
+
+    // Audio encoding - optimized for mobile
+    args.push(
       '-c:a', 'aac',
-      '-b:a', '128k',
+      '-b:a', '96k',
       '-ar', '48000',
+      '-ac', '1', // Mono
       '-movflags', '+faststart',
       OUTPUT_FILE,
     );
+
+    addLog?.('info', 'Convert', `FFmpeg profile: maxrate=${maxRate}k, bufsize=${bufSize}k, scale=${scaleFilter || 'none'}`);
 
     return args;
   };
@@ -307,12 +356,17 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
     file: File,
     quality: QualityPreset,
     onStageChange?: (stage: ConversionStage) => void,
-    videoDuration?: number | null
+    videoDuration?: number | null,
+    sourceWidth?: number | null,
+    sourceHeight?: number | null
   ): Promise<ConversionResult> => {
     // Store video duration for progress calculation
     videoDurationRef.current = videoDuration ?? null;
     if (videoDuration) {
       addLog?.('info', 'Convert', `Video süresi: ${videoDuration.toFixed(2)} sn`);
+    }
+    if (sourceWidth && sourceHeight) {
+      addLog?.('info', 'Convert', `Çözünürlük: ${sourceWidth}x${sourceHeight}`);
     }
 
     const ffmpeg = ffmpegRef.current;
@@ -407,7 +461,12 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
     addLog?.('info', 'Convert', 'EXEC_STARTED');
     updateDebugInfo?.({ ffmpegExecStatus: 'running', ffmpegExecStartTime: Date.now() });
 
-    const ffmpegArgs = buildFFmpegArgs(crf, false);
+    const ffmpegArgs = buildFFmpegArgs(
+      crf, 
+      false, 
+      sourceWidth ?? null, 
+      sourceHeight ?? null
+    );
     addLog?.('info', 'FFmpeg', `Komut: ${ffmpegArgs.join(' ')}`);
 
     let maxDuplicatedFrames = 0;
@@ -586,7 +645,12 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
         lastProgressPercent = 10;
         lastFFmpegMessageRef.current = '';
         
-        const fallbackArgs = buildFFmpegArgs(crf, true);
+        const fallbackArgs = buildFFmpegArgs(
+          crf, 
+          true, 
+          sourceWidth ?? null, 
+          sourceHeight ?? null
+        );
         addLog?.('info', 'FFmpeg', `Fallback Komut: ${fallbackArgs.join(' ')}`);
         
         progressHandlerRef.current = (data: { progress: number }) => {
@@ -718,8 +782,33 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
     
     const blob = new Blob([uint8Output.buffer as ArrayBuffer], { type: 'video/mp4' });
     const duration = (Date.now() - startTimeRef.current) / 1000;
+    const inputSize = fileData.byteLength;
+    const outputSize = blob.size;
+    const compressionRatio = Math.round((1 - outputSize / inputSize) * 100);
     
-    addLog?.('success', 'Convert', `CONVERSION_COMPLETE: ${duration.toFixed(1)} sn, ${blob.size} bytes`);
+    // Calculate bitrates
+    const videoDurationSeconds = videoDurationRef.current ?? (duration * 0.8); // Approximate if not available
+    const videoBitrateKbps = videoDurationSeconds > 0 ? (outputSize * 8 / 1000 / videoDurationSeconds) : null;
+    const audioBitrateKbps = 96; // Fixed at 96k
+    const totalBitrateKbps = videoBitrateKbps !== null ? videoBitrateKbps + audioBitrateKbps : null;
+    
+    addLog?.('success', 'Convert', `CONVERSION_COMPLETE: ${duration.toFixed(1)} sn`);
+    addLog?.('info', 'Convert', `Input: ${(inputSize / (1024 * 1024)).toFixed(2)}MB`);
+    addLog?.('info', 'Convert', `Output: ${(outputSize / (1024 * 1024)).toFixed(2)}MB`);
+    addLog?.('info', 'Convert', `Compression: ${compressionRatio}%`);
+    if (totalBitrateKbps !== null) {
+      addLog?.('info', 'Convert', `Total bitrate: ${totalBitrateKbps.toFixed(0)}kbps`);
+    }
+
+    // Update debug info with compression stats
+    updateDebugInfo?.({
+      inputSize,
+      outputSize,
+      compressionRatio,
+      videoBitrate: videoBitrateKbps,
+      audioBitrate: audioBitrateKbps,
+      totalBitrate: totalBitrateKbps,
+    });
 
     if (progressHandlerRef.current && ffmpeg) {
       ffmpeg.off('progress', progressHandlerRef.current);
@@ -737,6 +826,12 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
       fileName: getOutputFileName(file.name),
       fileSize: blob.size,
       duration,
+      inputSize,
+      outputSize,
+      compressionRatio,
+      videoBitrate: videoBitrateKbps ?? undefined,
+      audioBitrate: audioBitrateKbps,
+      totalBitrate: totalBitrateKbps ?? undefined,
     };
   }, [updateProgress, clearAllTimeouts, addLog, updateDebugInfo, normalizeError]);
 

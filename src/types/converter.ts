@@ -52,6 +52,13 @@ export interface ConversionResult {
   fileName: string;
   fileSize: number;
   duration: number;
+  // Compression stats
+  inputSize: number;
+  outputSize: number;
+  compressionRatio: number; // percentage (e.g., 55 means 55% reduction)
+  videoBitrate?: number; // kbps
+  audioBitrate?: number; // kbps
+  totalBitrate?: number; // kbps
 }
 
 export interface ConversionError {

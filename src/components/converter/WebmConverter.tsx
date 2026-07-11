@@ -235,9 +235,11 @@ export function WebmConverter() {
       }
 
       addLog('info', 'Convert', 'Dönüştürme başlatılıyor');
-      // Pass video duration for accurate progress calculation
+      // Pass video duration and dimensions for accurate progress calculation
       const videoDuration = metadata?.duration ?? null;
-      const convertResult = await convert(selectedFile, settings.quality, setStage, videoDuration);
+      const sourceWidth = metadata?.width ?? null;
+      const sourceHeight = metadata?.height ?? null;
+      const convertResult = await convert(selectedFile, settings.quality, setStage, videoDuration, sourceWidth, sourceHeight);
       setResult(convertResult);
       addLog('success', 'Convert', 'Dönüştürme tamamlandı');
     } catch (err) {
