@@ -13,13 +13,11 @@ import { useFfmpeg } from '@/hooks/useFfmpeg';
 import type { 
   ConversionSettings as SettingsType, 
   ConversionStage,
-  VideoMetadata,
   ConversionResult as ResultType,
   ConversionError as ErrorType,
 } from '@/types/converter';
 
 function checkBrowserSupport(): { supported: boolean; message?: string } {
-  // Check for required APIs
   if (typeof window === 'undefined') {
     return { supported: false, message: 'Tarayıcı desteklenmiyor.' };
   }
@@ -36,7 +34,6 @@ function checkBrowserSupport(): { supported: boolean; message?: string } {
     return { supported: false, message: 'Tarayıcınız File API\'sini desteklemiyor.' };
   }
   
-  // Check for WebAssembly support
   if (typeof WebAssembly === 'undefined' || typeof WebAssembly.instantiate === 'undefined') {
     return { supported: false, message: 'Tarayıcınız WebAssembly desteklemiyor. Lütfen güncel bir tarayıcı kullanın.' };
   }
@@ -45,10 +42,7 @@ function checkBrowserSupport(): { supported: boolean; message?: string } {
 }
 
 export function WebmConverter() {
-  const [browserCheck, setBrowserCheck] = useState<{ supported: boolean; message?: string } | null>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [metadata, setMetadata] = useState<VideoMetadata | null>(null);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [settings, setSettings] = useState<SettingsType>({ quality: 'balanced' });
   const [result, setResult] = useState<ResultType | null>(null);
   const [conversionError, setConversionError] = useState<ErrorType | null>(null);
@@ -58,28 +52,17 @@ export function WebmConverter() {
     isLoaded: ffmpegLoaded, 
     isLoading: ffmpegLoading, 
     progress, 
-    error: ffmpegError,
     loadFFmpeg, 
     convert,
     terminate,
   } = useFfmpeg();
 
-  const { metadata: videoMetadata, previewUrl: videoPreviewUrl, error: metadataError } = useVideoMetadataState(selectedFile);
+  const { metadata, previewUrl, error: metadataError } = useVideoMetadataState(selectedFile);
 
-  // Browser compatibility check on mount
-  useEffect(() => {
-    setBrowserCheck(checkBrowserSupport());
-  }, []);
-
-  // Sync metadata from hook to local state
-  useEffect(() => {
-    if (videoMetadata) {
-      setMetadata(videoMetadata);
-    }
-    if (videoPreviewUrl) {
-      setPreviewUrl(videoPreviewUrl);
-    }
-  }, [videoMetadata, videoPreviewUrl]);
+  // Browser compatibility check - computed once
+  const browserCheck = typeof window !== 'undefined' 
+    ? checkBrowserSupport() 
+    : { supported: true };
 
   const handleFileSelect = useCallback((file: File) => {
     setSelectedFile(file);
@@ -89,17 +72,11 @@ export function WebmConverter() {
   }, []);
 
   const handleRemoveFile = useCallback(() => {
-    // Revoke preview URL if exists
-    if (previewUrl) {
-      URL.revokeObjectURL(previewUrl);
-    }
     setSelectedFile(null);
-    setMetadata(null);
-    setPreviewUrl(null);
     setResult(null);
     setConversionError(null);
     setStage('idle');
-  }, [previewUrl]);
+  }, []);
 
   const handleConvert = useCallback(async () => {
     if (!selectedFile) return;
@@ -113,7 +90,6 @@ export function WebmConverter() {
         await loadFFmpeg();
       }
 
-      // Check if FFmpeg loaded successfully
       if (!ffmpegLoaded) {
         throw new Error('FFmpeg yüklenemedi');
       }
@@ -122,16 +98,13 @@ export function WebmConverter() {
       setResult(convertResult);
     } catch (err) {
       console.error('Conversion failed:', err);
-      // Error is already set by the hook
     }
   }, [selectedFile, ffmpegLoaded, loadFFmpeg, convert, settings.quality]);
 
   const handleRetry = useCallback(() => {
-    // Terminate existing FFmpeg to clean state
     terminate();
     setConversionError(null);
     setStage('idle');
-    // Small delay before retry
     setTimeout(() => {
       if (selectedFile) {
         handleConvert();
@@ -140,38 +113,19 @@ export function WebmConverter() {
   }, [selectedFile, handleConvert, terminate]);
 
   const handleReset = useCallback(() => {
-    // Terminate FFmpeg to clean up
     terminate();
-    
-    // Revoke preview URL if exists
-    if (previewUrl) {
-      URL.revokeObjectURL(previewUrl);
-    }
-    
-    // Revoke result blob URL if exists
-    if (result?.blob) {
-      // The blob is created fresh each time, no URL to revoke
-    }
-    
     setSelectedFile(null);
-    setMetadata(null);
-    setPreviewUrl(null);
     setResult(null);
     setConversionError(null);
     setStage('idle');
-  }, [previewUrl, result, terminate]);
+  }, [terminate]);
 
-  // Cleanup on unmount
   useEffect(() => {
     return () => {
       terminate();
-      if (previewUrl) {
-        URL.revokeObjectURL(previewUrl);
-      }
     };
-  }, [terminate, previewUrl]);
+  }, [terminate]);
 
-  // Show browser not supported message
   if (browserCheck && !browserCheck.supported) {
     return (
       <div className="w-full max-w-[720px] mx-auto px-4 py-8 space-y-6">
@@ -182,7 +136,7 @@ export function WebmConverter() {
           <h2 className="text-xl font-semibold text-red-800">Tarayıcı Desteklenmiyor</h2>
           <p className="text-red-600">{browserCheck.message}</p>
           <p className="text-sm text-red-500">
-            Lütfen Chrome, Firefox, Edge veya Safari'nin güncel bir sürümünü kullanın.
+            Lütfen Chrome, Firefox, Edge veya Safari&apos;nin güncel bir sürümünü kullanın.
           </p>
         </div>
       </div>

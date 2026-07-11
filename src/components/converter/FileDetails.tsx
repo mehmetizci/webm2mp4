@@ -84,7 +84,7 @@ export function FileDetails({ file, metadata, previewUrl, onRemove }: FileDetail
             <div>
               <p className="text-[10px] text-[#9CA3AF]">Ses</p>
               <p className="text-xs text-[#374151] font-medium">
-                {metadata.hasAudio ? 'Var' : 'Yok'}
+                {metadata.hasAudio === null ? 'Bilinmiyor' : metadata.hasAudio ? 'Var' : 'Yok'}
               </p>
             </div>
           </div>

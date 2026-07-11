@@ -15,32 +15,39 @@ export function useVideoMetadata(): UseVideoMetadataResult & {
   loadMetadata: (file: File) => void;
   reset: () => void;
 } {
-  const metadataRef = useRef<VideoMetadata | null>(null);
+  const [state, setState] = useState<UseVideoMetadataResult>({
+    metadata: null,
+    previewUrl: null,
+    error: null,
+    isLoading: false,
+  });
+  
+  const videoRef = useRef<HTMLVideoElement | null>(null);
   const previewUrlRef = useRef<string | null>(null);
-  const videoElementRef = useRef<HTMLVideoElement | null>(null);
-  const errorRef = useRef<string | null>(null);
-  const isLoadingRef = useRef<boolean>(false);
 
   const reset = useCallback(() => {
     if (previewUrlRef.current) {
       revokeBlobUrl(previewUrlRef.current);
       previewUrlRef.current = null;
     }
-    if (videoElementRef.current) {
-      videoElementRef.current.src = '';
-      videoElementRef.current = null;
+    if (videoRef.current) {
+      videoRef.current.src = '';
+      videoRef.current = null;
     }
-    metadataRef.current = null;
-    errorRef.current = null;
-    isLoadingRef.current = false;
+    setState({
+      metadata: null,
+      previewUrl: null,
+      error: null,
+      isLoading: false,
+    });
   }, []);
 
   const loadMetadata = useCallback((file: File) => {
     reset();
-    isLoadingRef.current = true;
+    setState(prev => ({ ...prev, isLoading: true }));
 
     const video = document.createElement('video');
-    videoElementRef.current = video;
+    videoRef.current = video;
     video.preload = 'metadata';
     video.muted = true;
 
@@ -48,21 +55,38 @@ export function useVideoMetadata(): UseVideoMetadataResult & {
     previewUrlRef.current = url;
     video.src = url;
 
+    const cleanup = () => {
+      if (videoRef.current) {
+        videoRef.current.src = '';
+        videoRef.current = null;
+      }
+    };
+
     video.onloadedmetadata = () => {
-      metadataRef.current = {
-        name: file.name,
-        size: file.size,
-        duration: video.duration,
-        width: video.videoWidth,
-        height: video.videoHeight,
-        hasAudio: false,
-      };
-      isLoadingRef.current = false;
+      setState({
+        metadata: {
+          name: file.name,
+          size: file.size,
+          duration: video.duration,
+          width: video.videoWidth,
+          height: video.videoHeight,
+          hasAudio: null,
+        },
+        previewUrl: url,
+        error: null,
+        isLoading: false,
+      });
+      cleanup();
     };
 
     video.onerror = () => {
-      errorRef.current = 'Video dosyası okunamadı veya bozuk olabilir.';
-      isLoadingRef.current = false;
+      setState({
+        metadata: null,
+        previewUrl: null,
+        error: 'Video dosyası okunamadı veya bozuk olabilir.',
+        isLoading: false,
+      });
+      cleanup();
     };
   }, [reset]);
 
@@ -71,17 +95,14 @@ export function useVideoMetadata(): UseVideoMetadataResult & {
       if (previewUrlRef.current) {
         revokeBlobUrl(previewUrlRef.current);
       }
-      if (videoElementRef.current) {
-        videoElementRef.current.src = '';
+      if (videoRef.current) {
+        videoRef.current.src = '';
       }
     };
   }, []);
 
   return {
-    metadata: metadataRef.current,
-    previewUrl: previewUrlRef.current,
-    error: errorRef.current,
-    isLoading: isLoadingRef.current,
+    ...state,
     loadMetadata,
     reset,
   };
@@ -101,8 +122,7 @@ export function useVideoMetadataState(
   const previewUrlRef = useRef<string | null>(null);
 
   useEffect(() => {
-    if (!file) {
-      // Cleanup
+    const cleanup = () => {
       if (previewUrlRef.current) {
         revokeBlobUrl(previewUrlRef.current);
         previewUrlRef.current = null;
@@ -111,6 +131,11 @@ export function useVideoMetadataState(
         videoRef.current.src = '';
         videoRef.current = null;
       }
+    };
+
+    if (!file) {
+      cleanup();
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setState({
         metadata: null,
         previewUrl: null,
@@ -132,21 +157,14 @@ export function useVideoMetadataState(
     previewUrlRef.current = url;
     video.src = url;
 
-    const cleanup = () => {
-      if (videoRef.current) {
-        videoRef.current.src = '';
-        videoRef.current = null;
-      }
-    };
-
-    video.onloadedmetadata = () => {
+    const onMetadata = () => {
       const metadata: VideoMetadata = {
         name: file.name,
         size: file.size,
         duration: video.duration,
         width: video.videoWidth,
         height: video.videoHeight,
-        hasAudio: false,
+        hasAudio: null,
       };
       
       setState({
@@ -158,7 +176,7 @@ export function useVideoMetadataState(
       cleanup();
     };
 
-    video.onerror = () => {
+    const onError = () => {
       setState({
         metadata: null,
         previewUrl: null,
@@ -168,7 +186,12 @@ export function useVideoMetadataState(
       cleanup();
     };
 
-    return cleanup;
+    video.onloadedmetadata = onMetadata;
+    video.onerror = onError;
+
+    return () => {
+      cleanup();
+    };
   }, [file]);
 
   return state;

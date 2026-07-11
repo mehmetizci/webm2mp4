@@ -4,7 +4,8 @@ export interface VideoMetadata {
   duration: number;
   width: number;
   height: number;
-  hasAudio: boolean;
+  hasAudio: boolean | null; // null = bilinmiyor
+  frameRate?: number;
 }
 
 export interface ConversionProgress {
