@@ -160,11 +160,13 @@ export function WebmConverter() {
       addLog('success', 'Conversion', 'Dönüştürme tamamlandı');
     } catch (err) {
       const error = err instanceof Error ? err : new Error(String(err));
-      addLog('error', 'Conversion', `Hata: ${error.message}`, { stack: error.stack });
+      addLog('error', 'Conversion', `YAKALANAN HATA: ${error.message}`, { stack: error.stack });
       updateDebugInfo({
         errorMessage: error.message,
         errorStack: error.stack,
       });
+      // Error should already be set in the convert function, but ensure stage is set to error
+      setStage('error');
     } finally {
       stopElapsedTimer();
     }

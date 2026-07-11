@@ -64,6 +64,14 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
 
   const { addLog, updateDebugInfo } = debugCallbacks || {};
 
+  // Normalize error to extract message and stack
+  const normalizeError = (err: unknown): { message: string; stack: string | null } => {
+    if (err instanceof Error) {
+      return { message: err.message, stack: err.stack || null };
+    }
+    return { message: String(err), stack: null };
+  };
+
   const clearProgressTimeout = useCallback(() => {
     if (progressTimeoutRef.current) {
       clearTimeout(progressTimeoutRef.current);
@@ -299,31 +307,34 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
       addLog?.('success', 'Load', 'FFmpeg hazır');
     } catch (err) {
       console.error('[FFmpeg] Load error:', err);
-      const error = err instanceof Error ? err : new Error(String(err));
-      const errorText = error.message;
+      const { message, stack } = normalizeError(err);
       
-      addLog?.('error', 'Load', `Hata: ${errorText}`, { stack: error.stack });
+      addLog?.('error', 'Load', `LOAD_FAILED: ${message}`, { stack });
       updateDebugInfo?.({ 
         ffmpegLoadStatus: 'error',
         errorCode: 'FFMPEG_LOAD_ERROR',
-        errorMessage: errorText,
-        errorStack: error.stack,
+        errorMessage: `FFmpeg yüklenemedi: ${message}`,
+        errorStack: stack,
       });
       
       let errorMessage = 'Dönüştürücü yüklenemedi.';
+      let errorCode = 'FFMPEG_LOAD_ERROR';
       
-      if (errorText === 'H264_NOT_FOUND') {
+      if (message === 'H264_NOT_FOUND' || message.includes('H264')) {
         errorMessage = 'Bu tarayıcıda gerekli H.264 dönüştürücü yüklenemedi. Lütfen sayfayı yenileyerek tekrar deneyin.';
-      } else if (errorText.includes('fetch') || errorText.includes('network') || errorText.includes('Failed to')) {
+        errorCode = 'H264_NOT_FOUND';
+      } else if (message.includes('fetch') || message.includes('network') || message.includes('Failed to') || message.includes('404')) {
         errorMessage = 'FFmpeg dosyaları yüklenemedi. Lütfen internet bağlantınızı kontrol edin ve sayfayı yenileyin.';
-      } else {
-        errorMessage = 'Dönüştürücü yüklenemedi. Tarayıcınız WebAssembly desteklemiyor olabilir.';
+        errorCode = 'FFMPEG_FETCH_ERROR';
+      } else if (message.includes('WASM') || message.includes('wasm')) {
+        errorMessage = 'WebAssembly yüklenemedi. Lütfen sayfayı yenileyin.';
+        errorCode = 'WASM_LOAD_ERROR';
       }
       
       const errorObj: ConversionError = {
-        code: 'FFMPEG_LOAD_ERROR',
+        code: errorCode,
         message: errorMessage,
-        technical: errorText,
+        technical: message,
       };
       setError(errorObj);
       updateProgress(0, 'error', false);
@@ -331,7 +342,7 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
       clearTimeout(loadTimeout);
       setIsLoading(false);
     }
-  }, [isLoading, updateProgress, checkEncoders, addLog, updateDebugInfo]);
+  }, [isLoading, updateProgress, checkEncoders, addLog, updateDebugInfo, normalizeError]);
 
   const analyzeMedia = useCallback(async (file: File): Promise<MediaInfo> => {
     const ffmpeg = ffmpegRef.current;
@@ -358,31 +369,51 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
   ): Promise<ConversionResult> => {
     const ffmpeg = ffmpegRef.current;
     if (!ffmpeg) {
-      addLog?.('error', 'Convert', 'FFmpeg henüz yüklenmedi');
-      throw new Error('FFmpeg henüz yüklenmedi');
+      const err = new Error('FFmpeg henüz yüklenmedi');
+      addLog?.('error', 'Convert', `HATA: ${err.message}`, { stack: err.stack });
+      updateDebugInfo?.({ errorMessage: err.message, errorStack: err.stack });
+      const errorObj: ConversionError = {
+        code: 'FFMPEG_NOT_LOADED',
+        message: 'FFmpeg henüz yüklenmedi.',
+        technical: err.message,
+      };
+      setError(errorObj);
+      throw err;
     }
 
     const validation = encoderValidationRef.current;
     if (!validation) {
-      addLog?.('error', 'Convert', 'Dönüştürücü hazır değil');
-      throw new Error('Dönüştürücü hazır değil');
+      const err = new Error('Dönüştürücü hazır değil');
+      addLog?.('error', 'Convert', `HATA: ${err.message}`, { stack: err.stack });
+      updateDebugInfo?.({ errorMessage: err.message, errorStack: err.stack });
+      const errorObj: ConversionError = {
+        code: 'ENCODER_NOT_VALIDATED',
+        message: 'Dönüştürücü hazır değil.',
+        technical: err.message,
+      };
+      setError(errorObj);
+      throw err;
     }
 
     if (!validation.h264) {
-      addLog?.('error', 'Convert', 'H.264 encoder mevcut değil');
+      const err = new Error('H264_NOT_FOUND');
+      addLog?.('error', 'Convert', `HATA: H.264 encoder mevcut değil`, { stack: err.stack });
+      updateDebugInfo?.({ errorMessage: 'H.264 encoder mevcut değil', errorStack: err.stack });
       const errorObj: ConversionError = {
         code: 'H264_ENCODER_UNAVAILABLE',
         message: 'Bu tarayıcıda gerekli H.264 dönüştürücü yüklenemedi. Lütfen sayfayı yenileyerek tekrar deneyin.',
+        technical: err.message,
       };
       setError(errorObj);
       onStageChange?.('error');
-      throw new Error('H264_NOT_FOUND');
+      throw err;
     }
 
     // Initialize start time and clear any previous timeout
     startTimeRef.current = Date.now();
     clearProgressTimeout();
     setError(null);
+    updateDebugInfo?.({ fileWriteStatus: 'idle', ffmpegExecStartTime: null, lastProgressValue: null });
 
     const crfMap: Record<QualityPreset, number> = {
       high: 18,
@@ -394,161 +425,164 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
     // Flag to track if we've received first progress event
     let hasReceivedProgress = false;
 
+    // Step 1: Read file into memory
+    onStageChange?.('reading');
+    updateProgress(0, 'reading', false);
+    addLog?.('info', 'Convert', 'Dosya okunuyor...');
+    
+    let fileData: Uint8Array;
     try {
-      onStageChange?.('reading');
-      updateProgress(0, 'reading', false);
-      addLog?.('info', 'Convert', 'Dosya okunuyor');
-
-      console.log('[FFmpeg] ffmpeg.exec started - reading file');
-      
-      fileDataRef.current = new Uint8Array(await file.arrayBuffer());
-      addLog?.('info', 'Convert', `Dosya belleğe yüklendi: ${fileDataRef.current.byteLength} bytes`);
-      
-      updateDebugInfo?.({ fileWriteStatus: 'writing' });
-      addLog?.('info', 'Convert', 'Dosya FFmpeg VFS\'e yazılıyor...');
-      await ffmpeg.writeFile(INPUT_FILE, fileDataRef.current);
-      updateDebugInfo?.({ fileWriteStatus: 'written' });
-      addLog?.('success', 'Convert', 'Dosya FFmpeg VFS\'e yazıldı');
-      
-      onStageChange?.('analyzing');
-      updateProgress(5, 'analyzing', false);
-      addLog?.('info', 'Convert', 'Medya analizi başlatılıyor');
-
-      const mediaInfo = await parseMediaInfo(ffmpeg, file, INPUT_FILE);
-      addLog?.('info', 'Convert', `Medya analiz edildi: ${mediaInfo.resolution || 'bilinmiyor'}, sesli: ${mediaInfo.hasAudio}`);
-
-      if (mediaInfo.hasAudio && !validation.aac) {
-        addLog?.('error', 'Convert', 'Video sesli ancak AAC encoder mevcut değil');
-        const errorObj: ConversionError = {
-          code: 'AAC_ENCODER_UNAVAILABLE',
-          message: 'Bu videoda ses var ancak AAC dönüştürücü yüklenemedi. Lütfen sayfayı yenileyerek tekrar deneyin.',
-        };
-        setError(errorObj);
-        onStageChange?.('error');
-        throw new Error('AAC_NOT_FOUND');
-      }
-
-      onStageChange?.('converting');
-      updateProgress(10, 'converting', false);
-      addLog?.('info', 'Convert', 'Dönüştürme başlatılıyor');
-
-      const ffmpegArgs = [
-        '-i', INPUT_FILE,
-        '-c:v', 'libx264',
-        '-preset', 'veryfast',
-        '-crf', crf.toString(),
-        '-pix_fmt', 'yuv420p',
-        '-movflags', '+faststart',
-      ];
-
-      if (mediaInfo.hasAudio) {
-        ffmpegArgs.push(
-          '-c:a', 'aac',
-          '-b:a', '128k',
-          '-ar', '48000'
-        );
-      } else {
-        ffmpegArgs.push('-an');
-      }
-
-      ffmpegArgs.push(OUTPUT_FILE);
-
-      console.log('[FFmpeg] Command:', ffmpegArgs.join(' '));
-      console.log('[FFmpeg] Has audio:', mediaInfo.hasAudio);
-      console.log('[FFmpeg] ffmpeg.exec starting with args...');
-      addLog?.('info', 'FFmpeg', `Komut: ${ffmpegArgs.join(' ')}`);
-      addLog?.('info', 'Convert', 'ffmpeg.exec() başlatılıyor...');
-      updateDebugInfo?.({ ffmpegExecStartTime: Date.now() });
-
-      // Set up progress handler
-      progressHandlerRef.current = ({ progress: p }) => {
-        if (!hasReceivedProgress) {
-          hasReceivedProgress = true;
-          clearProgressTimeout();
-          console.log('[FFmpeg] First progress event received');
-          addLog?.('success', 'Convert', 'İlk progress olayı alındı');
-        }
-        const percent = 10 + Math.round(p * 85);
-        updateProgress(percent, 'converting', true);
-        updateDebugInfo?.({ lastProgressValue: percent });
+      fileData = new Uint8Array(await file.arrayBuffer());
+      addLog?.('info', 'Convert', `Dosya belleğe yüklendi: ${fileData.byteLength} bytes`);
+      updateDebugInfo?.({ fileSize: fileData.byteLength });
+    } catch (err) {
+      const { message, stack } = normalizeError(err);
+      addLog?.('error', 'Convert', `FILE_READ_FAILED: ${message}`, { stack });
+      updateDebugInfo?.({ errorMessage: `Dosya okunamadı: ${message}`, errorStack: stack });
+      const errorObj: ConversionError = {
+        code: 'FILE_READ_ERROR',
+        message: 'Video dosyası okunamadı.',
+        technical: message,
       };
-      ffmpeg.on('progress', progressHandlerRef.current);
+      setError(errorObj);
+      onStageChange?.('error');
+      throw err;
+    }
 
-      // Set up progress timeout (30 seconds)
-      progressTimeoutRef.current = setTimeout(() => {
-        console.error('[FFmpeg] Progress timeout - no progress event received in 30 seconds');
-        addLog?.('error', 'Convert', '30 saniye içinde progress olayı alınamadı - timeout');
-      }, PROGRESS_TIMEOUT_MS);
+    // Step 2: Write file to FFmpeg VFS
+    updateDebugInfo?.({ fileWriteStatus: 'writing' });
+    addLog?.('info', 'Convert', `WRITE_FILE_STARTED: ${INPUT_FILE} (${fileData.byteLength} bytes)`);
+    updateDebugInfo?.({ fileWriteStatus: 'writing' });
+    
+    try {
+      fileDataRef.current = fileData;
+      await ffmpeg.writeFile(INPUT_FILE, fileData);
+      updateDebugInfo?.({ fileWriteStatus: 'written' });
+      addLog?.('success', 'Convert', `WRITE_FILE_SUCCESS: ${INPUT_FILE}`);
+    } catch (err) {
+      const { message, stack } = normalizeError(err);
+      updateDebugInfo?.({ fileWriteStatus: 'error' });
+      addLog?.('error', 'Convert', `WRITE_FILE_FAILED: ${message}`, { 
+        stack,
+        details: { fileName: INPUT_FILE, dataLength: fileData.byteLength }
+      });
+      updateDebugInfo?.({ errorMessage: `Dosya FFmpeg VFS'ye yazılamadı: ${message}`, errorStack: stack });
+      const errorObj: ConversionError = {
+        code: 'WRITE_FILE_ERROR',
+        message: 'Dosya FFmpeg VFS\'ye yazılamadı.',
+        technical: `${message}\nFile: ${INPUT_FILE}\nSize: ${fileData.byteLength} bytes`,
+      };
+      setError(errorObj);
+      onStageChange?.('error');
+      throw err;
+    }
 
+    // Step 3: Analyze media
+    onStageChange?.('analyzing');
+    updateProgress(5, 'analyzing', false);
+    addLog?.('info', 'Convert', 'Medya analizi başlatılıyor...');
+    
+    let mediaInfo: MediaInfo;
+    try {
+      mediaInfo = await parseMediaInfo(ffmpeg, file, INPUT_FILE);
+      addLog?.('success', 'Convert', `ANALYSIS_SUCCESS: ${mediaInfo.resolution || 'bilinmiyor'}, sesli: ${mediaInfo.hasAudio}`);
+    } catch (err) {
+      const { message, stack } = normalizeError(err);
+      addLog?.('error', 'Convert', `ANALYSIS_FAILED: ${message}`, { stack });
+      updateDebugInfo?.({ errorMessage: `Medya analizi başarısız: ${message}`, errorStack: stack });
+      const errorObj: ConversionError = {
+        code: 'ANALYSIS_ERROR',
+        message: 'Medya analizi başarısız.',
+        technical: message,
+      };
+      setError(errorObj);
+      onStageChange?.('error');
+      throw err;
+    }
+
+    if (mediaInfo.hasAudio && !validation.aac) {
+      addLog?.('error', 'Convert', `AAC_NOT_FOUND: Video sesli ancak AAC encoder mevcut değil`);
+      updateDebugInfo?.({ errorMessage: 'AAC encoder mevcut değil', errorStack: null });
+      const errorObj: ConversionError = {
+        code: 'AAC_ENCODER_UNAVAILABLE',
+        message: 'Bu videoda ses var ancak AAC dönüştürücü yüklenemedi. Lütfen sayfayı yenileyerek tekrar deneyin.',
+        technical: 'AAC encoder not available',
+      };
+      setError(errorObj);
+      onStageChange?.('error');
+      throw new Error('AAC_NOT_FOUND');
+    }
+
+    // Step 4: Execute FFmpeg
+    onStageChange?.('converting');
+    updateProgress(10, 'converting', false);
+    addLog?.('info', 'Convert', 'Dönüştürme başlatılıyor...');
+
+    const ffmpegArgs = [
+      '-i', INPUT_FILE,
+      '-c:v', 'libx264',
+      '-preset', 'veryfast',
+      '-crf', crf.toString(),
+      '-pix_fmt', 'yuv420p',
+      '-movflags', '+faststart',
+    ];
+
+    if (mediaInfo.hasAudio) {
+      ffmpegArgs.push(
+        '-c:a', 'aac',
+        '-b:a', '128k',
+        '-ar', '48000'
+      );
+    } else {
+      ffmpegArgs.push('-an');
+    }
+
+    ffmpegArgs.push(OUTPUT_FILE);
+
+    console.log('[FFmpeg] Command:', ffmpegArgs.join(' '));
+    console.log('[FFmpeg] Has audio:', mediaInfo.hasAudio);
+    addLog?.('info', 'FFmpeg', `Komut: ${ffmpegArgs.join(' ')}`);
+    addLog?.('info', 'Convert', 'EXEC_STARTED...');
+    updateDebugInfo?.({ ffmpegExecStartTime: Date.now() });
+
+    // Set up progress handler
+    progressHandlerRef.current = ({ progress: p }) => {
+      if (!hasReceivedProgress) {
+        hasReceivedProgress = true;
+        clearProgressTimeout();
+        console.log('[FFmpeg] First progress event received');
+        addLog?.('success', 'Convert', 'PROGRESS_RECEIVED: İlk progress olayı alındı');
+      }
+      const percent = 10 + Math.round(p * 85);
+      updateProgress(percent, 'converting', true);
+      updateDebugInfo?.({ lastProgressValue: percent });
+    };
+    ffmpeg.on('progress', progressHandlerRef.current);
+
+    // Set up progress timeout (30 seconds)
+    progressTimeoutRef.current = setTimeout(() => {
+      console.error('[FFmpeg] Progress timeout - no progress event received in 30 seconds');
+      addLog?.('error', 'Convert', 'PROGRESS_TIMEOUT: 30 saniye içinde progress olayı alınamadı');
+    }, PROGRESS_TIMEOUT_MS);
+
+    try {
       await ffmpeg.exec(ffmpegArgs as string[]);
       console.log('[FFmpeg] ffmpeg.exec completed successfully');
-      addLog?.('success', 'Convert', 'ffmpeg.exec() tamamlandı');
-      
-      clearProgressTimeout();
-      ffmpeg.off('progress', progressHandlerRef.current);
-      progressHandlerRef.current = null;
-
-      onStageChange?.('finalizing');
-      updateProgress(95, 'finalizing', true);
-      addLog?.('info', 'Convert', 'Çıktı dosyası okunuyor');
-      
-      const outputData = await ffmpeg.readFile(OUTPUT_FILE);
-      addLog?.('info', 'Convert', `Çıktı dosyası okundu: ${outputData instanceof Uint8Array ? outputData.byteLength : 'bilinmiyor'} bytes`);
-
-      onStageChange?.('complete');
-      updateProgress(100, 'complete', true);
-
-      let uint8Output: Uint8Array;
-      if (outputData instanceof Uint8Array) {
-        uint8Output = new Uint8Array(outputData);
-      } else if (typeof outputData === 'string') {
-        const encoder = new TextEncoder();
-        uint8Output = encoder.encode(outputData);
-      } else {
-        uint8Output = new Uint8Array(outputData as ArrayBuffer);
-      }
-      
-      const blob = new Blob([uint8Output.buffer as ArrayBuffer], { type: 'video/mp4' });
-      const duration = (Date.now() - startTimeRef.current) / 1000;
-      
-      console.log('[FFmpeg] Conversion completed in', duration.toFixed(1), 'seconds');
-      addLog?.('success', 'Convert', `Dönüştürme tamamlandı: ${duration.toFixed(1)} saniye, ${blob.size} bytes`);
-
-      return {
-        blob,
-        fileName: getOutputFileName(file.name),
-        fileSize: blob.size,
-        duration,
-      };
+      addLog?.('success', 'Convert', 'EXEC_SUCCESS: ffmpeg.exec() tamamlandı');
     } catch (err) {
-      console.error('[FFmpeg] Conversion error:', err);
-      
+      const { message, stack } = normalizeError(err);
       clearProgressTimeout();
       
-      const error = err instanceof Error ? err : new Error(String(err));
-      const errorText = error.message;
-      
-      addLog?.('error', 'Convert', `HATA: ${errorText}`, { stack: error.stack });
-      updateDebugInfo?.({
-        errorCode: 'CONVERSION_ERROR',
-        errorMessage: errorText,
-        errorStack: error.stack,
-      });
+      addLog?.('error', 'Convert', `EXEC_FAILED: ${message}`, { stack });
+      updateDebugInfo?.({ errorMessage: `Dönüştürme başlatılamadı: ${message}`, errorStack: stack });
       
       let errorMessage = 'Video dönüştürülürken bir sorun oluştu. Lütfen daha küçük bir dosyayla tekrar deneyin veya farklı bir tarayıcı kullanın.';
       let errorCode = 'CONVERSION_ERROR';
       
-      if (errorText === 'H264_NOT_FOUND') {
-        errorMessage = 'Bu tarayıcıda gerekli H.264 dönüştürücü yüklenemedi. Lütfen sayfayı yenileyerek tekrar deneyin.';
-        errorCode = 'H264_ENCODER_UNAVAILABLE';
-      } else if (errorText === 'AAC_NOT_FOUND') {
-        errorMessage = 'Bu videoda ses var ancak AAC dönüştürücü yüklenemedi. Lütfen sayfayı yenileyerek tekrar deneyin.';
-        errorCode = 'AAC_ENCODER_UNAVAILABLE';
-      } else if (errorText.includes('memory') || errorText.includes('Memory')) {
+      if (message.includes('memory') || message.includes('Memory')) {
         errorMessage = 'Cihaz belleği yetersiz. Lütfen daha küçük bir dosya deneyin.';
         errorCode = 'MEMORY_ERROR';
       } else if (!hasReceivedProgress) {
-        // If we never received any progress, it might be a timeout or FFmpeg crash
         errorMessage = 'Video dönüştürme başlatılamadı. Bu genellikle cihaz belleğinin yetersiz olduğu anlamına gelir.';
         errorCode = 'PROGRESS_TIMEOUT';
       }
@@ -556,27 +590,87 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
       const errorObj: ConversionError = {
         code: errorCode,
         message: errorMessage,
-        technical: errorText,
+        technical: message,
       };
       setError(errorObj);
       updateDebugInfo?.({ errorCode, errorMessage });
-
       onStageChange?.('error');
       throw err;
-    } finally {
-      clearProgressTimeout();
-      if (progressHandlerRef.current && ffmpeg) {
-        ffmpeg.off('progress', progressHandlerRef.current);
-        progressHandlerRef.current = null;
-      }
-      
-      await cleanupAllFiles(ffmpeg);
-      
-      if (fileDataRef.current) {
-        fileDataRef.current = null;
-      }
     }
-  }, [cleanupAllFiles, parseMediaInfo, updateProgress, clearProgressTimeout, addLog, updateDebugInfo]);
+    
+    clearProgressTimeout();
+    ffmpeg.off('progress', progressHandlerRef.current);
+    progressHandlerRef.current = null;
+
+    // Step 5: Read output file
+    onStageChange?.('finalizing');
+    updateProgress(95, 'finalizing', true);
+    addLog?.('info', 'Convert', 'MP4 okunuyor...');
+    
+    let outputData: Uint8Array | string;
+    try {
+      const rawOutput = await ffmpeg.readFile(OUTPUT_FILE);
+      if (rawOutput instanceof Uint8Array) {
+        outputData = rawOutput;
+      } else if (typeof rawOutput === 'string') {
+        outputData = rawOutput;
+      } else {
+        outputData = new Uint8Array(rawOutput as ArrayBuffer);
+      }
+      addLog?.('success', 'Convert', `OUTPUT_READ_SUCCESS: ${outputData instanceof Uint8Array ? outputData.byteLength : 'bilinmiyor'} bytes`);
+    } catch (err) {
+      const { message, stack } = normalizeError(err);
+      addLog?.('error', 'Convert', `OUTPUT_READ_FAILED: ${message}`, { stack });
+      updateDebugInfo?.({ errorMessage: `MP4 dosyası okunamadı: ${message}`, errorStack: stack });
+      const errorObj: ConversionError = {
+        code: 'OUTPUT_READ_ERROR',
+        message: 'MP4 dosyası okunamadı.',
+        technical: message,
+      };
+      setError(errorObj);
+      onStageChange?.('error');
+      throw err;
+    }
+
+    onStageChange?.('complete');
+    updateProgress(100, 'complete', true);
+
+    let uint8Output: Uint8Array;
+    if (outputData instanceof Uint8Array) {
+      uint8Output = new Uint8Array(outputData);
+    } else if (typeof outputData === 'string') {
+      const encoder = new TextEncoder();
+      uint8Output = encoder.encode(outputData);
+    } else {
+      uint8Output = new Uint8Array(outputData as ArrayBuffer);
+    }
+    
+    const blob = new Blob([uint8Output.buffer as ArrayBuffer], { type: 'video/mp4' });
+    const duration = (Date.now() - startTimeRef.current) / 1000;
+    
+    console.log('[FFmpeg] Conversion completed in', duration.toFixed(1), 'seconds');
+    addLog?.('success', 'Convert', `CONVERSION_COMPLETE: ${duration.toFixed(1)} sn, ${blob.size} bytes`);
+
+    // Cleanup
+    clearProgressTimeout();
+    if (progressHandlerRef.current && ffmpeg) {
+      ffmpeg.off('progress', progressHandlerRef.current);
+      progressHandlerRef.current = null;
+    }
+    
+    await cleanupAllFiles(ffmpeg);
+    
+    if (fileDataRef.current) {
+      fileDataRef.current = null;
+    }
+
+    return {
+      blob,
+      fileName: getOutputFileName(file.name),
+      fileSize: blob.size,
+      duration,
+    };
+  }, [cleanupAllFiles, parseMediaInfo, updateProgress, clearProgressTimeout, addLog, updateDebugInfo, normalizeError]);
 
   const terminate = useCallback(() => {
     clearProgressTimeout();
