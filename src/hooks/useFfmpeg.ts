@@ -20,11 +20,20 @@ const OUTPUT_FILE = 'output.mp4';
 const MOBILE_EXEC_TIMEOUT_MS = 180000; // 180 seconds for mobile
 const DESKTOP_EXEC_TIMEOUT_MS = 300000; // 300 seconds for desktop
 const STALL_TIMEOUT_MS = 90000; // 90 seconds stall detection
-const PROGRESS_ACTIVITY_TIMEOUT_MS = 60000; // 60 seconds - consider stalled if no activity
+const DUPLICATE_FRAME_WARNING_THRESHOLD = 100; // Warn when dup > 100
+const DUPLICATE_FRAME_ABORT_THRESHOLD = 1000; // Abort and retry when dup > 1000
 
 interface EncoderValidation {
   h264: boolean;
   aac: boolean;
+}
+
+interface FFmpegLogStats {
+  encodedFrame: number | null;
+  encodedTime: number | null;
+  encodingFps: number | null;
+  duplicatedFrames: number | null;
+  encodingSpeed: number | null;
 }
 
 interface DebugCallbacks {
@@ -48,11 +57,11 @@ interface UseFfmpegReturn {
   terminate: () => void;
 }
 
-// Check if device is mobile
+// Check if device is mobile using simple userAgent check
 function isMobileDevice(): boolean {
   if (typeof navigator === 'undefined') return false;
-  const userAgent = navigator.userAgent.toLowerCase();
-  return /android|webos|iphone|ipad|ipod|blackberry|iemobile|opera mini/i.test(userAgent);
+  const userAgent = navigator.userAgent;
+  return /Android|iPhone|iPad|iPod/i.test(userAgent);
 }
 
 // Get device memory (in GB)
@@ -71,6 +80,49 @@ function getCPUCores(): number {
   return 4;
 }
 
+// Parse FFmpeg progress line: frame=1167 time=00:00:01.16 dup=1134 speed=0.00753x
+function parseFFmpegProgress(line: string): FFmpegLogStats | null {
+  const stats: FFmpegLogStats = {
+    encodedFrame: null,
+    encodedTime: null,
+    encodingFps: null,
+    duplicatedFrames: null,
+    encodingSpeed: null,
+  };
+
+  // Parse frame
+  const frameMatch = line.match(/frame=\s*(\d+)/);
+  if (frameMatch) stats.encodedFrame = parseInt(frameMatch[1], 10);
+
+  // Parse time
+  const timeMatch = line.match(/time=\s*(\d{2}):(\d{2}):(\d{2}\.?\d*)/);
+  if (timeMatch) {
+    const hours = parseInt(timeMatch[1], 10);
+    const minutes = parseInt(timeMatch[2], 10);
+    const seconds = parseFloat(timeMatch[3]);
+    stats.encodedTime = hours * 3600 + minutes * 60 + seconds;
+  }
+
+  // Parse fps
+  const fpsMatch = line.match(/fps=\s*([\d.]+)/);
+  if (fpsMatch) stats.encodingFps = parseFloat(fpsMatch[1]);
+
+  // Parse dup (duplicated frames)
+  const dupMatch = line.match(/dup=\s*(\d+)/);
+  if (dupMatch) stats.duplicatedFrames = parseInt(dupMatch[1], 10);
+
+  // Parse speed
+  const speedMatch = line.match(/speed=\s*([\d.]+)x/);
+  if (speedMatch) stats.encodingSpeed = parseFloat(speedMatch[1]);
+
+  // Return null if no valid stats found
+  if (stats.encodedFrame === null && stats.encodedTime === null) {
+    return null;
+  }
+
+  return stats;
+}
+
 export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
   const ffmpegRef = useRef<FFmpeg | null>(null);
   const fileDataRef = useRef<Uint8Array | null>(null);
@@ -81,6 +133,7 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
   const stallTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastActivityRef = useRef<number>(Date.now());
   const ffmpegLogHandlerRef = useRef<((data: { message: string }) => void) | null>(null);
+  const lastFFmpegMessageRef = useRef<string>(''); // Prevent duplicate log messages
   
   const [isLoaded, setIsLoaded] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -102,14 +155,6 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
       return { message: err.message, stack: err.stack || null };
     }
     return { message: String(err), stack: null };
-  };
-
-  // Safely normalize FFmpeg progress value
-  const normalizeProgress = (rawProgress: unknown): number => {
-    const p = typeof rawProgress === 'number' ? rawProgress : 0;
-    if (p < 0 || !isFinite(p)) return -1;
-    if (p > 1) return -1; // Treat as invalid
-    return Math.max(0, Math.min(1, p));
   };
 
   // Clear all timeouts
@@ -292,13 +337,11 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
       const ffmpeg = new FFmpeg();
       addLog?.('info', 'Load', 'FFmpeg başlatılıyor');
 
-      // Set up log handler to capture FFmpeg logs
-      ffmpegLogHandlerRef.current = ({ message }: { message: string }) => {
+      // Only set up log handler once during load (not during conversion)
+      const loadLogHandler = ({ message }: { message: string }) => {
         console.log('[FFmpeg]', message);
-        // Pass FFmpeg raw logs to debug panel
-        addLog?.('info', 'FFmpeg', message);
       };
-      ffmpeg.on('log', ffmpegLogHandlerRef.current);
+      ffmpeg.on('log', loadLogHandler);
 
       updateDebugInfo?.({ coreJsLoadStatus: 'loading', wasmLoadStatus: 'loading' });
       addLog?.('info', 'Load', 'Core JS yükleniyor: /ffmpeg/ffmpeg-core.js');
@@ -390,6 +433,45 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
     }
   }, [parseMediaInfo, cleanupFFmpegFiles]);
 
+  // Helper function to build FFmpeg arguments
+  const buildFFmpegArgs = (
+    hasAudio: boolean,
+    crf: number,
+    useFallback: boolean
+  ): string[] => {
+    const mobile = isMobileDevice();
+    const args: string[] = ['-fflags', '+genpts', '-i', INPUT_FILE];
+
+    if (useFallback) {
+      // Fallback command with setpts filter for timestamp issues
+      args.push('-vf', 'setpts=N/(30*TB),fps=30', '-fps_mode', 'cfr');
+      addLog?.('info', 'Convert', 'Fallback komut kullanılıyor (setpts filtresi ile)');
+    } else {
+      // Normal command with fps filter
+      args.push('-vf', 'fps=30', '-fps_mode', 'cfr');
+    }
+
+    args.push('-c:v', 'libx264');
+
+    // Mobile uses ultrafast, desktop uses veryfast
+    if (mobile) {
+      args.push('-preset', 'ultrafast', '-threads', '1');
+    } else {
+      args.push('-preset', 'veryfast', '-threads', '1');
+    }
+
+    args.push('-crf', crf.toString(), '-pix_fmt', 'yuv420p', '-movflags', '+faststart');
+
+    if (hasAudio) {
+      args.push('-c:a', 'aac', '-b:a', '128k', '-ar', '48000');
+    } else {
+      args.push('-an');
+    }
+
+    args.push(OUTPUT_FILE);
+    return args;
+  };
+
   const convert = useCallback(async (
     file: File,
     quality: QualityPreset,
@@ -474,12 +556,8 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
     const deviceMemory = getDeviceMemory();
     const cpuCores = getCPUCores();
     const mobile = isMobileDevice();
-    addLog?.('info', 'Convert', `Cihaz bilgisi: Hafıza=${deviceMemory || 'bilinmiyor'}GB, Çekirdek=${cpuCores}, Mobil=${mobile}`);
-    addLog?.('info', 'Convert', `Video: ${mediaInfo.resolution || 'bilinmiyor'}, Süre=${mediaInfo.duration?.toFixed(1) || 'bilinmiyor'}sn, Kalite=${quality} (CRF=${crf})`);
-
-    // Flag to track activity
-    let hasReceivedProgress = false;
-    let hasReceivedFFmpegActivity = false;
+    addLog?.('info', 'Convert', `Cihaz: Hafıza=${deviceMemory || 'bilinmiyor'}GB, Çekirdek=${cpuCores}, Mobil=${mobile}`);
+    addLog?.('info', 'Convert', `Video: ${mediaInfo.resolution || 'bilinmiyor'}, Süre=${mediaInfo.duration?.toFixed(1) || 'bilinmiyor'}sn, CRF=${crf}`);
 
     // Step 1: Read file
     onStageChange?.('reading');
@@ -509,7 +587,7 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
     }
 
     // Step 2: Write file to FFmpeg VFS
-    addLog?.('info', 'Convert', `WRITE_FILE_STARTED: ${INPUT_FILE} (${fileData.byteLength} bytes)`);
+    addLog?.('info', 'Convert', `WRITE_FILE_STARTED: ${INPUT_FILE}`);
     updateDebugInfo?.({ fileWriteStatus: 'writing' });
     
     try {
@@ -576,62 +654,78 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
     addLog?.('info', 'Convert', 'EXEC_STARTED');
     updateDebugInfo?.({ ffmpegExecStatus: 'running', ffmpegExecStartTime: Date.now() });
 
-    // Build FFmpeg args - optimize for mobile
-    const ffmpegArgs = ['-i', INPUT_FILE, '-c:v', 'libx264'];
-
-    // Mobile optimization
-    if (mobile) {
-      ffmpegArgs.push('-preset', 'ultrafast', '-threads', '1');
-    } else {
-      ffmpegArgs.push('-preset', 'veryfast');
-    }
-
-    ffmpegArgs.push('-crf', crf.toString(), '-pix_fmt', 'yuv420p', '-movflags', '+faststart');
-
-    // Scale high resolution videos on mobile
-    if (mobile && parsedMediaInfo.resolution) {
-      const [width] = parsedMediaInfo.resolution.split('x').map(Number);
-      if (width > 720) {
-        ffmpegArgs.push('-vf', "scale='min(720,iw)':-2");
-        addLog?.('info', 'Convert', 'Mobil için çözünürlük 720p ile sınırlıyoruz');
-      }
-    }
-
-    if (parsedMediaInfo.hasAudio) {
-      ffmpegArgs.push('-c:a', 'aac', '-b:a', '128k', '-ar', '48000');
-    } else {
-      ffmpegArgs.push('-an');
-    }
-
-    ffmpegArgs.push(OUTPUT_FILE);
-
+    // Build FFmpeg args (normal mode first)
+    const ffmpegArgs = buildFFmpegArgs(parsedMediaInfo.hasAudio, crf, false);
     addLog?.('info', 'FFmpeg', `Komut: ${ffmpegArgs.join(' ')}`);
 
-    // Progress handler
+    // Track duplicate frames for auto-retry
+    let maxDuplicatedFrames = 0;
+    let hasWarnedAboutDuplicates = false;
+    let hasRetriedWithFallback = false;
+    let lastProgressPercent = 10;
+
+    // Progress handler - updates lastActivity
     progressHandlerRef.current = (data: { progress: number; time?: number }) => {
       lastActivityRef.current = Date.now();
       
-      if (!hasReceivedProgress) {
-        hasReceivedProgress = true;
-        clearTimeout(stallTimeoutRef.current!);
-        addLog?.('success', 'Convert', `PROGRESS_RECEIVED`);
+      // Calculate progress from FFmpeg progress if available
+      const normalizedProgress = data.progress;
+      if (normalizedProgress > 0 && normalizedProgress <= 1) {
+        lastProgressPercent = 10 + Math.round(normalizedProgress * 85);
+        updateProgress(lastProgressPercent, 'converting', true);
+        updateDebugInfo?.({ lastProgressValue: lastProgressPercent });
       }
-      
-      const normalizedProgress = normalizeProgress(data.progress);
-      if (normalizedProgress < 0) return;
-      
-      const percent = 10 + Math.round(normalizedProgress * 85);
-      updateProgress(percent, 'converting', true);
-      updateDebugInfo?.({ lastProgressValue: percent });
     };
     ffmpeg.on('progress', progressHandlerRef.current);
 
-    // FFmpeg log handler for activity tracking
+    // FFmpeg log handler for activity tracking and duplicate frame detection
     const ffmpegLogHandler = ({ message }: { message: string }) => {
       lastActivityRef.current = Date.now();
-      hasReceivedFFmpegActivity = true;
       
-      // Pass to debug panel
+      // Prevent duplicate log messages
+      if (message === lastFFmpegMessageRef.current) {
+        return;
+      }
+      lastFFmpegMessageRef.current = message;
+      
+      // Parse progress line
+      const stats = parseFFmpegProgress(message);
+      if (stats) {
+        // Update debug info with parsed stats
+        updateDebugInfo?.({
+          encodedFrame: stats.encodedFrame,
+          encodedTime: stats.encodedTime,
+          encodingFps: stats.encodingFps,
+          duplicatedFrames: stats.duplicatedFrames,
+          encodingSpeed: stats.encodingSpeed,
+        });
+
+        // Track max duplicated frames
+        if (stats.duplicatedFrames !== null) {
+          if (stats.duplicatedFrames > maxDuplicatedFrames) {
+            maxDuplicatedFrames = stats.duplicatedFrames;
+          }
+
+          // Warning when dup > 100
+          if (stats.duplicatedFrames > DUPLICATE_FRAME_WARNING_THRESHOLD && !hasWarnedAboutDuplicates) {
+            hasWarnedAboutDuplicates = true;
+            addLog?.('warning', 'Convert', `Timestamp problemi: ${stats.duplicatedFrames} duplicate frame tespit edildi`);
+          }
+        }
+
+        // Calculate progress from encoded time if duration is available
+        if (stats.encodedTime !== null && parsedMediaInfo.duration && parsedMediaInfo.duration > 0) {
+          const progressFromTime = 10 + (stats.encodedTime / parsedMediaInfo.duration) * 85;
+          const percent = Math.min(95, Math.max(10, Math.round(progressFromTime)));
+          if (percent > lastProgressPercent) {
+            lastProgressPercent = percent;
+            updateProgress(percent, 'converting', true);
+            updateDebugInfo?.({ lastProgressValue: percent });
+          }
+        }
+      }
+
+      // Log to debug panel
       addLog?.('info', 'FFmpeg', message);
     };
     ffmpeg.on('log', ffmpegLogHandler);
@@ -640,7 +734,7 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
     stallTimeoutRef.current = setTimeout(() => {
       const timeSinceLastActivity = Date.now() - lastActivityRef.current;
       if (timeSinceLastActivity >= STALL_TIMEOUT_MS) {
-        addLog?.('error', 'Convert', `EXEC_TIMEOUT: 90 saniye aktivite yok - işlem durduruluyor`);
+        addLog?.('error', 'Convert', `EXEC_TIMEOUT: 90 saniye aktivite yok`);
         updateDebugInfo?.({ ffmpegExecStatus: 'timeout' });
         
         // Terminate FFmpeg
@@ -656,7 +750,7 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
         const errorObj: ConversionError = {
           code: 'EXEC_TIMEOUT',
           message: 'Dönüştürme cihazınızda yanıt vermedi. Video boyutu veya çözünürlüğü cihaz kapasitesini aşmış olabilir.',
-          technical: `90 saniye boyunca progress veya FFmpeg log aktivitesi yok\nSon aktivite: ${new Date(lastActivityRef.current).toISOString()}`,
+          technical: `90 saniye boyunca aktivite yok\nSon aktivite: ${new Date(lastActivityRef.current).toISOString()}`,
         };
         setError(errorObj);
         updateDebugInfo?.({ errorCode: 'EXEC_TIMEOUT', errorMessage: errorObj.message });
@@ -667,19 +761,26 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
     // Get timeout based on device type
     const execTimeout = isMobileDevice() ? MOBILE_EXEC_TIMEOUT_MS : DESKTOP_EXEC_TIMEOUT_MS;
 
-    try {
-      // Wrap ffmpeg.exec with Promise.race for timeout
+    // Helper function to execute FFmpeg with timeout
+    const execWithTimeout = async (args: string[]): Promise<void> => {
       await Promise.race([
-        ffmpeg.exec(ffmpegArgs as string[]),
+        ffmpeg.exec(args),
         new Promise<void>((_, reject) => {
           progressTimeoutRef.current = setTimeout(() => {
             reject(new Error('EXEC_TIMEOUT'));
           }, execTimeout);
         })
       ]);
-      
+    };
+
+    let execSuccess = false;
+    let execError: Error | null = null;
+
+    try {
+      await execWithTimeout(ffmpegArgs);
       clearTimeout(progressTimeoutRef.current!);
       progressTimeoutRef.current = null;
+      execSuccess = true;
       addLog?.('success', 'Convert', 'EXEC_SUCCESS');
       updateDebugInfo?.({ ffmpegExecStatus: 'completed' });
     } catch (err) {
@@ -687,13 +788,13 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
       progressTimeoutRef.current = null;
       
       const { message, stack } = normalizeError(err);
+      execError = err instanceof Error ? err : new Error(message);
       
       // If it's a timeout, terminate FFmpeg
       if (message === 'EXEC_TIMEOUT' || message.includes('timeout')) {
         addLog?.('error', 'Convert', `EXEC_TIMEOUT: ${isMobileDevice() ? '180' : '300'} saniye timeout`);
         updateDebugInfo?.({ ffmpegExecStatus: 'timeout' });
         
-        // Terminate FFmpeg
         try { ffmpeg.terminate(); } catch { /* ignore */ }
         ffmpegRef.current = null;
         setIsLoaded(false);
@@ -706,35 +807,115 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
         setError(errorObj);
         updateDebugInfo?.({ errorCode: 'EXEC_TIMEOUT', errorMessage: errorObj.message });
         onStageChange?.('error');
-        throw err;
+        throw execError;
       }
       
-      addLog?.('error', 'Convert', `EXEC_FAILED: ${message}`);
-      updateDebugInfo?.({ ffmpegExecStatus: 'error' });
-      
-      let errorMessage = 'Video dönüştürülürken bir sorun oluştu. Lütfen daha küçük bir dosyayla tekrar deneyin veya farklı bir tarayıcı kullanın.';
-      let errorCode = 'CONVERSION_ERROR';
-      
-      if (message.includes('memory') || message.includes('Memory')) {
-        errorMessage = 'Cihaz belleği yetersiz. Lütfen daha küçük bir dosya deneyin.';
-        errorCode = 'MEMORY_ERROR';
-      }
+      // Check if we should retry with fallback command
+      // Only retry once and only if duplicate frames are high
+      if (!hasRetriedWithFallback && maxDuplicatedFrames > DUPLICATE_FRAME_ABORT_THRESHOLD) {
+        hasRetriedWithFallback = true;
+        addLog?.('warning', 'Convert', `Çok fazla duplicate frame (${maxDuplicatedFrames}) - Fallback komutla yeniden deneniyor...`);
+        
+        // Clean up handlers
+        ffmpeg.off('progress', progressHandlerRef.current!);
+        ffmpeg.off('log', ffmpegLogHandler);
+        progressHandlerRef.current = null;
+        lastActivityRef.current = Date.now();
+        maxDuplicatedFrames = 0;
+        hasWarnedAboutDuplicates = false;
+        lastProgressPercent = 10;
+        lastFFmpegMessageRef.current = '';
+        
+        // Build fallback args and retry
+        const fallbackArgs = buildFFmpegArgs(parsedMediaInfo.hasAudio, crf, true);
+        addLog?.('info', 'FFmpeg', `Fallback Komut: ${fallbackArgs.join(' ')}`);
+        
+        // Re-setup handlers
+        progressHandlerRef.current = (data: { progress: number; time?: number }) => {
+          lastActivityRef.current = Date.now();
+          const normalizedProgress = data.progress;
+          if (normalizedProgress > 0 && normalizedProgress <= 1) {
+            lastProgressPercent = 10 + Math.round(normalizedProgress * 85);
+            updateProgress(lastProgressPercent, 'converting', true);
+            updateDebugInfo?.({ lastProgressValue: lastProgressPercent });
+          }
+        };
+        ffmpeg.on('progress', progressHandlerRef.current);
+        
+        const retryLogHandler = ({ message }: { message: string }) => {
+          lastActivityRef.current = Date.now();
+          if (message === lastFFmpegMessageRef.current) return;
+          lastFFmpegMessageRef.current = message;
+          
+          const stats = parseFFmpegProgress(message);
+          if (stats) {
+            updateDebugInfo?.({
+              encodedFrame: stats.encodedFrame,
+              encodedTime: stats.encodedTime,
+              encodingFps: stats.encodingFps,
+              duplicatedFrames: stats.duplicatedFrames,
+              encodingSpeed: stats.encodingSpeed,
+            });
 
-      const errorObj: ConversionError = {
-        code: errorCode,
-        message: errorMessage,
-        technical: `ffmpeg.exec() başarısız\nKomut: ${ffmpegArgs.join(' ')}\n${message}`,
-      };
-      setError(errorObj);
-      updateDebugInfo?.({ errorCode, errorMessage });
-      onStageChange?.('error');
-      throw err;
+            if (stats.duplicatedFrames !== null && stats.duplicatedFrames > maxDuplicatedFrames) {
+              maxDuplicatedFrames = stats.duplicatedFrames;
+            }
+
+            if (stats.encodedTime !== null && parsedMediaInfo.duration && parsedMediaInfo.duration > 0) {
+              const progressFromTime = 10 + (stats.encodedTime / parsedMediaInfo.duration) * 85;
+              const percent = Math.min(95, Math.max(10, Math.round(progressFromTime)));
+              if (percent > lastProgressPercent) {
+                lastProgressPercent = percent;
+                updateProgress(percent, 'converting', true);
+                updateDebugInfo?.({ lastProgressValue: percent });
+              }
+            }
+          }
+          addLog?.('info', 'FFmpeg', message);
+        };
+        ffmpeg.on('log', retryLogHandler);
+        
+        try {
+          await execWithTimeout(fallbackArgs);
+          clearTimeout(progressTimeoutRef.current!);
+          progressTimeoutRef.current = null;
+          execSuccess = true;
+          addLog?.('success', 'Convert', 'EXEC_SUCCESS (Fallback komut ile)');
+          updateDebugInfo?.({ ffmpegExecStatus: 'completed' });
+        } catch (retryErr) {
+          clearTimeout(progressTimeoutRef.current!);
+          progressTimeoutRef.current = null;
+          const { message: retryMsg } = normalizeError(retryErr);
+          execError = retryErr instanceof Error ? retryErr : new Error(retryMsg);
+          ffmpeg.off('progress', progressHandlerRef.current!);
+          ffmpeg.off('log', retryLogHandler);
+        }
+      }
     }
     
+    // Clean up handlers
     clearAllTimeouts();
     ffmpeg.off('progress', progressHandlerRef.current!);
     ffmpeg.off('log', ffmpegLogHandler);
     progressHandlerRef.current = null;
+
+    // Handle execution error if any
+    if (!execSuccess && execError) {
+      updateDebugInfo?.({ ffmpegExecStatus: 'error' });
+      
+      const errorMessage = 'Video dönüştürülürken bir sorun oluştu. Lütfen daha küçük bir dosyayla tekrar deneyin veya farklı bir tarayıcı kullanın.';
+      const errorCode = 'CONVERSION_ERROR';
+
+      const errorObj: ConversionError = {
+        code: errorCode,
+        message: errorMessage,
+        technical: `ffmpeg.exec() başarısız\nKomut: ${ffmpegArgs.join(' ')}\nHata: ${execError.message}\nMax duplicate frames: ${maxDuplicatedFrames}`,
+      };
+      setError(errorObj);
+      updateDebugInfo?.({ errorCode, errorMessage });
+      onStageChange?.('error');
+      throw execError;
+    }
 
     // Step 4: Read output file
     onStageChange?.('finalizing');
@@ -771,7 +952,7 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
 
     onStageChange?.('complete');
     updateProgress(100, 'complete', true);
-    updateDebugInfo?.({ ffmpegExecStatus: 'completed' });
+    updateDebugInfo?.({ ffmpegExecStatus: 'completed', fileWriteStatus: 'written' });
 
     let uint8Output: Uint8Array;
     if (outputData instanceof Uint8Array) {
@@ -790,7 +971,6 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
     updateDebugInfo?.({ fileWriteStatus: 'written' });
 
     // Cleanup
-    clearAllTimeouts();
     if (progressHandlerRef.current && ffmpeg) {
       ffmpeg.off('progress', progressHandlerRef.current);
       progressHandlerRef.current = null;
@@ -808,7 +988,7 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
       fileSize: blob.size,
       duration,
     };
-  }, [cleanupAllFiles, parseMediaInfo, updateProgress, clearAllTimeouts, addLog, updateDebugInfo, normalizeError, normalizeProgress]);
+  }, [cleanupAllFiles, parseMediaInfo, updateProgress, clearAllTimeouts, addLog, updateDebugInfo, normalizeError]);
 
   const terminate = useCallback(() => {
     clearAllTimeouts();
