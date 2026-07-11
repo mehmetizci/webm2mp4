@@ -1,19 +1,17 @@
 'use client';
 
-import { Video, Clock, Maximize2, Volume2, X, Film, Zap } from 'lucide-react';
+import { Video, Clock, Maximize2, Volume2, Film, VolumeX } from 'lucide-react';
 import type { VideoMetadata, MediaInfo } from '@/types/converter';
 import { formatFileSize, formatDuration } from '@/lib/file-utils';
-import { formatResolution, getResolutionLabel } from '@/lib/format-utils';
 
 interface FileDetailsProps {
   file: File;
   metadata: VideoMetadata;
   mediaInfo: MediaInfo | null;
   previewUrl: string | null;
-  onRemove: () => void;
 }
 
-export function FileDetails({ file, metadata, mediaInfo, previewUrl, onRemove }: FileDetailsProps) {
+export function FileDetails({ file, metadata, mediaInfo, previewUrl }: FileDetailsProps) {
   return (
     <div className="w-full space-y-4">
       <div className="relative w-full aspect-video bg-black rounded-[10px] overflow-hidden">
@@ -42,13 +40,6 @@ export function FileDetails({ file, metadata, mediaInfo, previewUrl, onRemove }:
               {formatFileSize(file.size)}
             </p>
           </div>
-          <button
-            onClick={onRemove}
-            className="flex items-center justify-center w-8 h-8 rounded-full bg-[#FEE2E2] text-[#DC2626] hover:bg-[#FECACA] transition-colors flex-shrink-0"
-            aria-label="Dosyayı kaldır"
-          >
-            <X className="w-4 h-4" />
-          </button>
         </div>
 
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-2 border-t border-[#E5E7EB]">
@@ -67,7 +58,7 @@ export function FileDetails({ file, metadata, mediaInfo, previewUrl, onRemove }:
             <div>
               <p className="text-[10px] text-[#9CA3AF]">Çözünürlük</p>
               <p className="text-xs text-[#374151] font-medium">
-                {formatResolution(metadata.width, metadata.height)}
+                {metadata.width}x{metadata.height}
               </p>
             </div>
           </div>
@@ -81,13 +72,17 @@ export function FileDetails({ file, metadata, mediaInfo, previewUrl, onRemove }:
           </div>
 
           <div className="flex items-center gap-2">
-            <Volume2 className="w-4 h-4 text-[#9CA3AF]" />
+            {mediaInfo?.hasAudio ? (
+              <Volume2 className="w-4 h-4 text-[#9CA3AF]" />
+            ) : (
+              <VolumeX className="w-4 h-4 text-[#9CA3AF]" />
+            )}
             <div>
               <p className="text-[10px] text-[#9CA3AF]">Ses</p>
               <p className="text-xs text-[#374151] font-medium">
-                {mediaInfo?.hasAudio !== undefined
-                  ? mediaInfo.hasAudio
-                    ? `Var (${mediaInfo.audioCodec?.toUpperCase() || 'AAC'})`
+                {mediaInfo?.hasAudio !== undefined 
+                  ? mediaInfo.hasAudio 
+                    ? `Var (${mediaInfo.audioCodec?.toUpperCase() || 'Bilinmiyor'})` 
                     : 'Yok'
                   : 'Bilinmiyor'}
               </p>
@@ -99,9 +94,9 @@ export function FileDetails({ file, metadata, mediaInfo, previewUrl, onRemove }:
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-2 border-t border-[#E5E7EB]">
             {mediaInfo.videoCodec && (
               <div className="flex items-center gap-2">
-                <Zap className="w-4 h-4 text-[#9CA3AF]" />
+                <Film className="w-4 h-4 text-[#9CA3AF]" />
                 <div>
-                  <p className="text-[10px] text-[#9CA3AF]">Video Codec</p>
+                  <p className="text-[10px] text-[#9CA3AF]">Codec</p>
                   <p className="text-xs text-[#374151] font-medium">
                     {mediaInfo.videoCodec.toUpperCase()}
                   </p>
@@ -123,7 +118,7 @@ export function FileDetails({ file, metadata, mediaInfo, previewUrl, onRemove }:
             
             {mediaInfo.bitrate && (
               <div className="flex items-center gap-2">
-                <Zap className="w-4 h-4 text-[#9CA3AF]" />
+                <Video className="w-4 h-4 text-[#9CA3AF]" />
                 <div>
                   <p className="text-[10px] text-[#9CA3AF]">Bitrate</p>
                   <p className="text-xs text-[#374151] font-medium">
@@ -151,11 +146,6 @@ export function FileDetails({ file, metadata, mediaInfo, previewUrl, onRemove }:
           <span className="inline-flex items-center px-2 py-1 rounded-full bg-[#376BFC]/10 text-[#376BFC] text-xs font-medium">
             WebM
           </span>
-          {getResolutionLabel(metadata.width, metadata.height) !== 'Düşük' && (
-            <span className="inline-flex items-center px-2 py-1 rounded-full bg-[#10B981]/10 text-[#10B981] text-xs font-medium">
-              {getResolutionLabel(metadata.width, metadata.height)}
-            </span>
-          )}
           {mediaInfo?.videoCodec && (
             <span className="inline-flex items-center px-2 py-1 rounded-full bg-[#6B7280]/10 text-[#6B7280] text-xs font-medium">
               {mediaInfo.videoCodec.toUpperCase()}

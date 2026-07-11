@@ -12,7 +12,7 @@ export interface MediaInfo {
   fileName: string;
   fileSize: number;
   videoCodec: string | null;
-  pixelFormat: string | null;
+  resolution: string | null;
   frameRate: number | null;
   bitrate: number | null;
   duration: number | null;
@@ -20,29 +20,6 @@ export interface MediaInfo {
   audioCodec: string | null;
   audioBitrate: number | null;
   audioSampleRate: number | null;
-  audioChannels: number | null;
-}
-
-export interface EncoderInfo {
-  h264: boolean;
-  vp8: boolean;
-  vp9: boolean;
-  aac: boolean;
-  mp3: boolean;
-}
-
-export interface ConversionCapabilities {
-  encoders: EncoderInfo;
-  videoCodec: 'libx264' | 'libvpx' | 'libvpx-vp9';
-  audioCodec: 'aac' | 'mp3';
-}
-
-export interface FileInfo {
-  file: File;
-  metadata: VideoMetadata | null;
-  mediaInfo: MediaInfo | null;
-  previewUrl: string | null;
-  isAnalyzing: boolean;
 }
 
 export interface ConversionProgress {
@@ -55,6 +32,7 @@ export type ConversionStage =
   | 'idle'
   | 'loading'
   | 'reading'
+  | 'analyzing'
   | 'converting'
   | 'finalizing'
   | 'complete'
@@ -79,13 +57,6 @@ export interface ConversionError {
   technical?: string;
 }
 
-export type ConversionState =
-  | { status: 'idle' }
-  | { status: 'file-selected'; file: File; metadata: VideoMetadata }
-  | { status: 'converting'; progress: ConversionProgress }
-  | { status: 'complete'; result: ConversionResult }
-  | { status: 'error'; error: ConversionError };
-
 export const QUALITY_PRESETS: Record<QualityPreset, { crf: number; label: string }> = {
   high: { crf: 18, label: 'Yüksek kalite' },
   balanced: { crf: 23, label: 'Dengeli' },
@@ -95,9 +66,10 @@ export const QUALITY_PRESETS: Record<QualityPreset, { crf: number; label: string
 export const STAGE_LABELS: Record<ConversionStage, string> = {
   idle: '',
   loading: 'Dönüştürücü hazırlanıyor',
-  reading: 'Video okunuyor',
-  converting: 'Video dönüştürülüyor',
-  finalizing: 'MP4 dosyası hazırlanıyor',
+  reading: 'Video dosyası okunuyor',
+  analyzing: 'Video analiz ediliyor',
+  converting: 'Video H.264 codec\'e dönüştürülüyor',
+  finalizing: 'MP4 dosyası paketleniyor',
   complete: 'İşlem tamamlandı',
   error: 'Hata oluştu',
 };

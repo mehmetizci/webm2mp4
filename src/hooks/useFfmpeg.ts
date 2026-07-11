@@ -9,20 +9,23 @@ import type {
   QualityPreset,
   ConversionStage,
   MediaInfo,
-  EncoderInfo,
-  ConversionCapabilities 
 } from '@/types/converter';
 import { getOutputFileName } from '@/lib/file-utils';
 
 const INPUT_FILE = 'input.webm';
+const ANALYZE_FILE = 'analyze.webm';
 const OUTPUT_FILE = 'output.mp4';
+
+interface EncoderValidation {
+  h264: boolean;
+  aac: boolean;
+}
 
 interface UseFfmpegReturn {
   isLoaded: boolean;
   isLoading: boolean;
   progress: ConversionProgress;
   error: ConversionError | null;
-  capabilities: ConversionCapabilities | null;
   loadFFmpeg: () => Promise<void>;
   analyzeMedia: (file: File) => Promise<MediaInfo>;
   convert: (
@@ -36,7 +39,9 @@ interface UseFfmpegReturn {
 export function useFfmpeg(): UseFfmpegReturn {
   const ffmpegRef = useRef<FFmpeg | null>(null);
   const fileDataRef = useRef<Uint8Array | null>(null);
-  const capabilitiesRef = useRef<ConversionCapabilities | null>(null);
+  const encoderValidationRef = useRef<EncoderValidation | null>(null);
+  const logHandlerRef = useRef<((data: { message: string }) => void) | null>(null);
+  const progressHandlerRef = useRef<((data: { progress: number }) => void) | null>(null);
   
   const [isLoaded, setIsLoaded] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -46,7 +51,6 @@ export function useFfmpeg(): UseFfmpegReturn {
     stage: 'idle',
   });
   const [error, setError] = useState<ConversionError | null>(null);
-  const [capabilities, setCapabilities] = useState<ConversionCapabilities | null>(null);
 
   const startTimeRef = useRef<number>(0);
 
@@ -59,71 +63,74 @@ export function useFfmpeg(): UseFfmpegReturn {
     });
   }, []);
 
-  const cleanupFiles = useCallback(async (ffmpeg: FFmpeg) => {
-    const files = [INPUT_FILE, OUTPUT_FILE];
-    for (const file of files) {
-      try {
-        await ffmpeg.deleteFile(file);
-      } catch {
-        // File might not exist, ignore
-      }
+  const cleanupFFmpegFiles = useCallback(async (ffmpeg: FFmpeg, fileName: string) => {
+    try {
+      await ffmpeg.deleteFile(fileName);
+    } catch {
+      // File might not exist, ignore
     }
   }, []);
 
-  const checkEncoders = useCallback(async (ffmpeg: FFmpeg): Promise<EncoderInfo> => {
-    const encoders: EncoderInfo = {
+  const cleanupAllFiles = useCallback(async (ffmpeg: FFmpeg) => {
+    await cleanupFFmpegFiles(ffmpeg, INPUT_FILE);
+    await cleanupFFmpegFiles(ffmpeg, ANALYZE_FILE);
+    await cleanupFFmpegFiles(ffmpeg, OUTPUT_FILE);
+  }, [cleanupFFmpegFiles]);
+
+  const checkEncoders = useCallback(async (ffmpeg: FFmpeg): Promise<EncoderValidation> => {
+    const validation: EncoderValidation = {
       h264: false,
-      vp8: false,
-      vp9: false,
       aac: false,
-      mp3: false,
     };
 
     return new Promise((resolve) => {
       const logs: string[] = [];
       
-      const logHandler = ({ message }: { message: string }) => {
+      const handler = ({ message }: { message: string }) => {
         logs.push(message);
         
-        // Check for video encoders
-        if (message.includes('libx264')) encoders.h264 = true;
-        if (message.includes('libvpx')) encoders.vp8 = true;
-        if (message.includes('libvpx-vp9')) encoders.vp9 = true;
-        
-        // Check for audio encoders
-        if (message.includes('aac')) encoders.aac = true;
-        if (message.includes('mp3') || message.includes('libmp3lame')) encoders.mp3 = true;
+        if (message.includes('libx264')) validation.h264 = true;
+        if (message.includes('aac')) validation.aac = true;
       };
       
-      ffmpeg.on('log', logHandler);
+      logHandlerRef.current = handler;
+      ffmpeg.on('log', handler);
       
       ffmpeg.exec(['-encoders']).then(() => {
-        ffmpeg.off('log', logHandler);
+        ffmpeg.off('log', handler);
+        logHandlerRef.current = null;
         
         if (process.env.NODE_ENV === 'development') {
-          console.log('[FFmpeg] Encoders found:', encoders);
+          console.log('[FFmpeg] Encoder validation:', validation);
         }
         
-        resolve(encoders);
+        resolve(validation);
       }).catch(() => {
-        ffmpeg.off('log', logHandler);
-        resolve(encoders);
+        ffmpeg.off('log', handler);
+        logHandlerRef.current = null;
+        resolve(validation);
       });
     });
   }, []);
 
-  const parseMediaInfo = useCallback(async (ffmpeg: FFmpeg, file: File): Promise<MediaInfo> => {
+  const parseMediaInfo = useCallback(async (
+    ffmpeg: FFmpeg, 
+    file: File, 
+    fileName: string
+  ): Promise<MediaInfo> => {
     return new Promise((resolve) => {
       const logs: string[] = [];
       
-      const logHandler = ({ message }: { message: string }) => {
+      const handler = ({ message }: { message: string }) => {
         logs.push(message);
       };
       
-      ffmpeg.on('log', logHandler);
+      logHandlerRef.current = handler;
+      ffmpeg.on('log', handler);
       
-      ffmpeg.exec(['-i', INPUT_FILE, '-f', 'null', '-']).then(() => {
-        ffmpeg.off('log', logHandler);
+      ffmpeg.exec(['-i', fileName, '-f', 'null', '-']).then(() => {
+        ffmpeg.off('log', handler);
+        logHandlerRef.current = null;
         
         const fullLog = logs.join('\n');
         
@@ -131,7 +138,7 @@ export function useFfmpeg(): UseFfmpegReturn {
           fileName: file.name,
           fileSize: file.size,
           videoCodec: null,
-          pixelFormat: null,
+          resolution: null,
           frameRate: null,
           bitrate: null,
           duration: null,
@@ -139,28 +146,23 @@ export function useFfmpeg(): UseFfmpegReturn {
           audioCodec: null,
           audioBitrate: null,
           audioSampleRate: null,
-          audioChannels: null,
         };
         
-        // Parse video codec
         const videoMatch = fullLog.match(/Video:\s*(\w+)/);
         if (videoMatch) {
           info.videoCodec = videoMatch[1];
         }
         
-        // Parse dimensions
         const dimsMatch = fullLog.match(/(\d+)x(\d+)/);
         if (dimsMatch) {
-          info.pixelFormat = `${dimsMatch[1]}x${dimsMatch[2]}`;
+          info.resolution = `${dimsMatch[1]}x${dimsMatch[2]}`;
         }
         
-        // Parse frame rate
         const fpsMatch = fullLog.match(/(\d+(?:\.\d+)?)\s*fps/);
         if (fpsMatch) {
           info.frameRate = parseFloat(fpsMatch[1]);
         }
         
-        // Parse duration
         const durationMatch = fullLog.match(/Duration:\s*(\d+):(\d+):(\d+)\.(\d+)/);
         if (durationMatch) {
           const hours = parseInt(durationMatch[1]);
@@ -170,13 +172,11 @@ export function useFfmpeg(): UseFfmpegReturn {
           info.duration = hours * 3600 + minutes * 60 + seconds + ms / 100;
         }
         
-        // Parse bitrate
         const bitrateMatch = fullLog.match(/bitrate:\s*(\d+)\s*kb/);
         if (bitrateMatch) {
           info.bitrate = parseInt(bitrateMatch[1]);
         }
         
-        // Parse audio stream info
         const audioMatch = fullLog.match(/Audio:\s*(\w+)[^\r\n]*/);
         if (audioMatch) {
           info.hasAudio = true;
@@ -191,26 +191,22 @@ export function useFfmpeg(): UseFfmpegReturn {
           if (sampleRateMatch) {
             info.audioSampleRate = parseInt(sampleRateMatch[1]);
           }
-          
-          const channelsMatch = audioMatch[0].match(/(\d+)\s*ch/);
-          if (channelsMatch) {
-            info.audioChannels = parseInt(channelsMatch[1]);
-          }
         }
         
         if (process.env.NODE_ENV === 'development') {
-          console.log('[FFmpeg] Media info:', info);
+          console.log('[FFmpeg] Media info parsed:', info);
         }
         
         resolve(info);
       }).catch(() => {
-        ffmpeg.off('log', logHandler);
+        ffmpeg.off('log', handler);
+        logHandlerRef.current = null;
         
         resolve({
           fileName: file.name,
           fileSize: file.size,
           videoCodec: null,
-          pixelFormat: null,
+          resolution: null,
           frameRate: null,
           bitrate: null,
           duration: null,
@@ -218,7 +214,6 @@ export function useFfmpeg(): UseFfmpegReturn {
           audioCodec: null,
           audioBitrate: null,
           audioSampleRate: null,
-          audioChannels: null,
         });
       });
     });
@@ -247,43 +242,37 @@ export function useFfmpeg(): UseFfmpegReturn {
 
       ffmpegRef.current = ffmpeg;
 
-      const encoders = await checkEncoders(ffmpeg);
-      
-      let videoCodec: 'libx264' | 'libvpx' | 'libvpx-vp9' = 'libx264';
-      let audioCodec: 'aac' | 'mp3' = 'aac';
-      
-      if (!encoders.h264) {
-        if (encoders.vp9) {
-          videoCodec = 'libvpx-vp9';
-          console.log('[FFmpeg] libx264 not available, using libvpx-vp9');
-        } else if (encoders.vp8) {
-          videoCodec = 'libvpx';
-          console.log('[FFmpeg] libx264 not available, using libvpx');
-        } else {
-          throw new Error('No supported video encoder found');
-        }
-      }
-      
-      if (!encoders.aac && encoders.mp3) {
-        audioCodec = 'mp3';
-        console.log('[FFmpeg] AAC not available, using MP3');
+      const validation = await checkEncoders(ffmpeg);
+      encoderValidationRef.current = validation;
+
+      if (!validation.h264) {
+        console.error('[FFmpeg] H.264 encoder not found');
+        throw new Error('H264_NOT_FOUND');
       }
 
-      const caps = { encoders, videoCodec, audioCodec };
-      capabilitiesRef.current = caps;
-      setCapabilities(caps);
+      if (process.env.NODE_ENV === 'development') {
+        console.log('[FFmpeg] H.264:', validation.h264, '| AAC:', validation.aac);
+      }
 
       setIsLoaded(true);
       updateProgress(0, 'idle');
     } catch (err) {
       console.error('FFmpeg load error:', err);
+      const errorText = err instanceof Error ? err.message : String(err);
+      
+      let errorMessage = 'Dönüştürücü yüklenemedi.';
+      
+      if (errorText === 'H264_NOT_FOUND') {
+        errorMessage = 'Bu tarayıcıda gerekli H.264 dönüştürücü yüklenemedi. Lütfen sayfayı yenileyerek tekrar deneyin.';
+      } else {
+        errorMessage = 'Dönüştürücü yüklenemedi. Tarayıcınız WebAssembly desteklemiyor olabilir.';
+      }
+      
       const errorObj: ConversionError = {
         code: 'FFMPEG_LOAD_ERROR',
-        message: 'Dönüştürücü yüklenemedi. Tarayıcınız WebAssembly desteklemiyor olabilir.',
+        message: errorMessage,
+        technical: errorText,
       };
-      if (err instanceof Error) {
-        errorObj.technical = err.message;
-      }
       setError(errorObj);
       updateProgress(0, 'error');
     } finally {
@@ -297,19 +286,17 @@ export function useFfmpeg(): UseFfmpegReturn {
       throw new Error('FFmpeg henüz yüklenmedi');
     }
 
-    const fileData = new Uint8Array(await file.arrayBuffer());
-    await ffmpeg.writeFile(INPUT_FILE, fileData);
-
-    const mediaInfo = await parseMediaInfo(ffmpeg, file);
-
     try {
-      await ffmpeg.deleteFile(INPUT_FILE);
-    } catch {
-      // Ignore cleanup errors
-    }
+      const fileData = new Uint8Array(await file.arrayBuffer());
+      await ffmpeg.writeFile(ANALYZE_FILE, fileData);
 
-    return mediaInfo;
-  }, [parseMediaInfo]);
+      const mediaInfo = await parseMediaInfo(ffmpeg, file, ANALYZE_FILE);
+
+      return mediaInfo;
+    } finally {
+      await cleanupFFmpegFiles(ffmpeg, ANALYZE_FILE);
+    }
+  }, [parseMediaInfo, cleanupFFmpegFiles]);
 
   const convert = useCallback(async (
     file: File,
@@ -321,9 +308,19 @@ export function useFfmpeg(): UseFfmpegReturn {
       throw new Error('FFmpeg henüz yüklenmedi');
     }
 
-    const caps = capabilitiesRef.current;
-    if (!caps) {
+    const validation = encoderValidationRef.current;
+    if (!validation) {
       throw new Error('Dönüştürücü hazır değil');
+    }
+
+    if (!validation.h264) {
+      const errorObj: ConversionError = {
+        code: 'H264_ENCODER_UNAVAILABLE',
+        message: 'Bu tarayıcıda gerekli H.264 dönüştürücü yüklenemedi. Lütfen sayfayı yenileyerek tekrar deneyin.',
+      };
+      setError(errorObj);
+      onStageChange?.('error');
+      throw new Error('H264_NOT_FOUND');
     }
 
     startTimeRef.current = Date.now();
@@ -336,9 +333,6 @@ export function useFfmpeg(): UseFfmpegReturn {
     };
     const crf = crfMap[quality];
 
-    const isH264 = caps.videoCodec === 'libx264';
-    const outputExt = isH264 ? 'mp4' : 'webm';
-
     try {
       onStageChange?.('reading');
       updateProgress(0, 'reading');
@@ -346,46 +340,39 @@ export function useFfmpeg(): UseFfmpegReturn {
       fileDataRef.current = new Uint8Array(await file.arrayBuffer());
       await ffmpeg.writeFile(INPUT_FILE, fileDataRef.current);
       
-      onStageChange?.('converting');
-      updateProgress(5, 'converting');
+      onStageChange?.('analyzing');
+      updateProgress(5, 'analyzing');
 
-      const mediaInfo = await parseMediaInfo(ffmpeg, file);
+      const mediaInfo = await parseMediaInfo(ffmpeg, file, INPUT_FILE);
 
-      onStageChange?.('finalizing');
-      updateProgress(10, 'finalizing');
-
-      const ffmpegArgs: (string | number)[] = ['-i', INPUT_FILE];
-
-      if (caps.videoCodec === 'libx264') {
-        ffmpegArgs.push(
-          '-c:v', 'libx264',
-          '-preset', 'veryfast',
-          '-crf', crf.toString(),
-          '-pix_fmt', 'yuv420p'
-        );
-        if (outputExt === 'mp4') {
-          ffmpegArgs.push('-movflags', '+faststart');
-        }
-      } else if (caps.videoCodec === 'libvpx-vp9') {
-        ffmpegArgs.push(
-          '-c:v', 'libvpx-vp9',
-          '-crf', crf.toString(),
-          '-b:v', '0'
-        );
-      } else {
-        ffmpegArgs.push(
-          '-c:v', 'libvpx',
-          '-crf', crf.toString(),
-          '-b:v', '1M'
-        );
+      if (mediaInfo.hasAudio && !validation.aac) {
+        const errorObj: ConversionError = {
+          code: 'AAC_ENCODER_UNAVAILABLE',
+          message: 'Bu videoda ses var ancak AAC dönüştürücü yüklenemedi. Lütfen sayfayı yenileyerek tekrar deneyin.',
+        };
+        setError(errorObj);
+        onStageChange?.('error');
+        throw new Error('AAC_NOT_FOUND');
       }
 
+      onStageChange?.('converting');
+      updateProgress(10, 'converting');
+
+      const ffmpegArgs = [
+        '-i', INPUT_FILE,
+        '-c:v', 'libx264',
+        '-preset', 'veryfast',
+        '-crf', crf.toString(),
+        '-pix_fmt', 'yuv420p',
+        '-movflags', '+faststart',
+      ];
+
       if (mediaInfo.hasAudio) {
-        if (caps.audioCodec === 'aac') {
-          ffmpegArgs.push('-c:a', 'aac', '-b:a', '128k', '-ar', '48000');
-        } else {
-          ffmpegArgs.push('-c:a', 'libmp3lame', '-b:a', '128k', '-ar', '48000');
-        }
+        ffmpegArgs.push(
+          '-c:a', 'aac',
+          '-b:a', '128k',
+          '-ar', '48000'
+        );
       } else {
         ffmpegArgs.push('-an');
       }
@@ -394,30 +381,27 @@ export function useFfmpeg(): UseFfmpegReturn {
 
       if (process.env.NODE_ENV === 'development') {
         console.log('[FFmpeg] Command:', ffmpegArgs.join(' '));
+        console.log('[FFmpeg] Has audio:', mediaInfo.hasAudio);
       }
 
-      const progressHandler = ({ progress: p }: { progress: number }) => {
+      progressHandlerRef.current = ({ progress: p }) => {
         const percent = 10 + Math.round(p * 85);
         updateProgress(percent, 'converting');
       };
-      
-      ffmpeg.on('progress', progressHandler);
+      ffmpeg.on('progress', progressHandlerRef.current);
 
       await ffmpeg.exec(ffmpegArgs as string[]);
       
-      ffmpeg.off('progress', progressHandler);
+      ffmpeg.off('progress', progressHandlerRef.current);
+      progressHandlerRef.current = null;
 
+      onStageChange?.('finalizing');
       updateProgress(95, 'finalizing');
+      
       const outputData = await ffmpeg.readFile(OUTPUT_FILE);
 
-      updateProgress(100, 'complete');
       onStageChange?.('complete');
-
-      await cleanupFiles(ffmpeg);
-
-      if (fileDataRef.current) {
-        fileDataRef.current = null;
-      }
+      updateProgress(100, 'complete');
 
       let uint8Output: Uint8Array;
       if (outputData instanceof Uint8Array) {
@@ -429,40 +413,32 @@ export function useFfmpeg(): UseFfmpegReturn {
         uint8Output = new Uint8Array(outputData as ArrayBuffer);
       }
       
-      const mimeType = isH264 ? 'video/mp4' : 'video/webm';
-      const blob = new Blob([uint8Output.buffer as ArrayBuffer], { type: mimeType });
+      const blob = new Blob([uint8Output.buffer as ArrayBuffer], { type: 'video/mp4' });
       const duration = (Date.now() - startTimeRef.current) / 1000;
 
       return {
         blob,
-        fileName: getOutputFileName(file.name).replace(/\.\w+$/, `.${outputExt}`),
+        fileName: getOutputFileName(file.name),
         fileSize: blob.size,
         duration,
       };
     } catch (err) {
       console.error('Conversion error:', err);
       
-      try {
-        await cleanupFiles(ffmpeg);
-      } catch {
-        // Ignore cleanup errors
-      }
+      const errorText = err instanceof Error ? err.message : String(err);
       
-      if (fileDataRef.current) {
-        fileDataRef.current = null;
-      }
-
       let errorMessage = 'Video dönüştürülürken bir sorun oluştu. Lütfen daha küçük bir dosyayla tekrar deneyin veya farklı bir tarayıcı kullanın.';
       let errorCode = 'CONVERSION_ERROR';
       
-      const errorText = err instanceof Error ? err.message : String(err);
-      
-      if (errorText.includes('memory') || errorText.includes('Memory')) {
+      if (errorText === 'H264_NOT_FOUND') {
+        errorMessage = 'Bu tarayıcıda gerekli H.264 dönüştürücü yüklenemedi. Lütfen sayfayı yenileyerek tekrar deneyin.';
+        errorCode = 'H264_ENCODER_UNAVAILABLE';
+      } else if (errorText === 'AAC_NOT_FOUND') {
+        errorMessage = 'Bu videoda ses var ancak AAC dönüştürücü yüklenemedi. Lütfen sayfayı yenileyerek tekrar deneyin.';
+        errorCode = 'AAC_ENCODER_UNAVAILABLE';
+      } else if (errorText.includes('memory') || errorText.includes('Memory')) {
         errorMessage = 'Cihaz belleği yetersiz. Lütfen daha küçük bir dosya deneyin.';
         errorCode = 'MEMORY_ERROR';
-      } else if (errorText.includes('Invalid') || errorText.includes('invalid') || errorText.includes('no supported encoder')) {
-        errorMessage = 'Video codec desteklenmiyor veya dosya bozuk.';
-        errorCode = 'INVALID_FILE';
       }
 
       const errorObj: ConversionError = {
@@ -470,21 +446,39 @@ export function useFfmpeg(): UseFfmpegReturn {
         message: errorMessage,
         technical: errorText,
       };
-      
       setError(errorObj);
+
       onStageChange?.('error');
-      
       throw err;
+    } finally {
+      if (progressHandlerRef.current && ffmpeg) {
+        ffmpeg.off('progress', progressHandlerRef.current);
+        progressHandlerRef.current = null;
+      }
+      
+      await cleanupAllFiles(ffmpeg);
+      
+      if (fileDataRef.current) {
+        fileDataRef.current = null;
+      }
     }
-  }, [cleanupFiles, parseMediaInfo, updateProgress]);
+  }, [cleanupAllFiles, parseMediaInfo, updateProgress]);
 
   const terminate = useCallback(() => {
     if (ffmpegRef.current) {
+      if (logHandlerRef.current) {
+        ffmpegRef.current.off('log', logHandlerRef.current);
+        logHandlerRef.current = null;
+      }
+      if (progressHandlerRef.current) {
+        ffmpegRef.current.off('progress', progressHandlerRef.current);
+        progressHandlerRef.current = null;
+      }
+      
       ffmpegRef.current.terminate();
       ffmpegRef.current = null;
       setIsLoaded(false);
-      capabilitiesRef.current = null;
-      setCapabilities(null);
+      encoderValidationRef.current = null;
     }
     if (fileDataRef.current) {
       fileDataRef.current = null;
@@ -498,7 +492,6 @@ export function useFfmpeg(): UseFfmpegReturn {
     isLoading,
     progress,
     error,
-    capabilities,
     loadFFmpeg,
     analyzeMedia,
     convert,

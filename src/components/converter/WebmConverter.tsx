@@ -55,7 +55,6 @@ export function WebmConverter() {
     isLoaded: ffmpegLoaded, 
     isLoading: ffmpegLoading, 
     progress, 
-    capabilities,
     loadFFmpeg, 
     analyzeMedia,
     convert,
@@ -196,23 +195,15 @@ export function WebmConverter() {
               metadata={metadata}
               mediaInfo={isAnalyzing ? null : mediaInfo}
               previewUrl={previewUrl}
-              onRemove={handleRemoveFile}
             />
-            
-            {capabilities && (
-              <div className="bg-[#F3F4F6] rounded-[10px] p-3 text-xs space-y-1">
-                <p className="font-medium text-[#374151]">Desteklenen Codec&apos;ler:</p>
-                <p className="text-[#6B7280]">
-                  Video: {capabilities.encoders.h264 ? 'H.264 ✓' : ''} 
-                  {capabilities.encoders.vp9 ? 'VP9 ✓' : ''} 
-                  {capabilities.encoders.vp8 ? 'VP8 ✓' : ''}
-                </p>
-                <p className="text-[#6B7280]">
-                  Ses: {capabilities.encoders.aac ? 'AAC ✓' : ''} 
-                  {capabilities.encoders.mp3 ? 'MP3 ✓' : ''}
-                </p>
-              </div>
-            )}
+
+            {/* Output format info */}
+            <div className="bg-[#F3F4F6] rounded-[10px] p-3 text-xs space-y-1">
+              <p className="font-medium text-[#374151]">Çıktı Formatı: MP4</p>
+              <p className="text-[#6B7280]">
+                Video: H.264 | Ses: AAC
+              </p>
+            </div>
             
             <ConversionSettings
               settings={settings}
