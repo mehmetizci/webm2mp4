@@ -45,6 +45,8 @@ export interface ConversionDebugInfo {
   // Encoding stats
   encodeTime: number | null;
   averageSpeed: number | null;
+  // Cleanup status
+  cleanupStatus: 'idle' | 'cleaning' | 'completed' | 'warning' | 'error';
   lastLogLines: string[];
   errorCode: string | null;
   errorMessage: string | null;
@@ -246,6 +248,8 @@ const initialDebugInfo: ConversionDebugInfo = {
   // Encoding stats
   encodeTime: null,
   averageSpeed: null,
+  // Cleanup status
+  cleanupStatus: 'idle',
   lastLogLines: [],
   errorCode: null,
   errorMessage: null,

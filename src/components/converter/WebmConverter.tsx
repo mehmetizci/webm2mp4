@@ -76,6 +76,9 @@ export function WebmConverter() {
 
   // Wake Lock ref to prevent screen from sleeping during conversion
   const wakeLockRef = useRef<WakeLockSentinelType | null>(null);
+  
+  // Object URL ref to manage download URLs properly
+  const objectUrlRef = useRef<string | null>(null);
 
   const { debugInfo, addLog, updateDebugInfo, resetDebugInfo, setFileInfo, startElapsedTimer, stopElapsedTimer } = useDebugLog();
 
@@ -173,6 +176,13 @@ export function WebmConverter() {
     if (!validation.valid) {
       addLog('error', 'File', `Geçersiz dosya: ${validation.error}`);
       return;
+    }
+    
+    // Revoke previous Object URL if exists
+    if (objectUrlRef.current) {
+      URL.revokeObjectURL(objectUrlRef.current);
+      objectUrlRef.current = null;
+      addLog('info', 'Cleanup', 'Previous Object URL revoked');
     }
     
     resetDebugInfo();
@@ -279,16 +289,30 @@ export function WebmConverter() {
   }, [selectedFile, handleConvert, terminate, updateDebugInfo]);
 
   const handleReset = useCallback(() => {
-    terminate();
+    // Revoke Object URL
+    if (objectUrlRef.current) {
+      URL.revokeObjectURL(objectUrlRef.current);
+      objectUrlRef.current = null;
+      addLog('info', 'Cleanup', 'Object URL revoked on reset');
+    }
+    
+    // Clear file references but keep FFmpeg alive
     setSelectedFile(null);
     setResult(null);
     setConversionError(null);
     setStage('idle');
     resetDebugInfo();
-  }, [terminate, resetDebugInfo]);
+    
+    // Note: FFmpeg worker is kept alive for faster subsequent conversions
+    addLog('info', 'Reset', 'State reset, FFmpeg kept alive');
+  }, [resetDebugInfo, addLog]);
 
   useEffect(() => {
     return () => {
+      // Revoke Object URL on unmount
+      if (objectUrlRef.current) {
+        URL.revokeObjectURL(objectUrlRef.current);
+      }
       terminate();
     };
   }, [terminate]);
