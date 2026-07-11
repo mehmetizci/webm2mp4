@@ -120,6 +120,8 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
   const lastFFmpegMessageRef = useRef<string>('');
   const lastEncodedTimeRef = useRef<number | null>(null);
   const videoDurationRef = useRef<number | null>(null);
+  const maxEncodedTimeRef = useRef<number>(0); // Track max encoded time for FFmpeg fallback
+  const hasHtml5MetadataRef = useRef(false); // Track if HTML5 metadata was successful
   
   const [isLoaded, setIsLoaded] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -545,10 +547,19 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
     addLog?.('info', 'Cleanup', 'Temizlik: önceki dosyalar kontrol ediliyor...');
     await preCleanup();
 
+    // Reset refs for new conversion
+    maxEncodedTimeRef.current = 0;
+    
     // Store video duration for progress calculation
-    videoDurationRef.current = videoDuration ?? null;
-    if (videoDuration) {
-      addLog?.('info', 'Convert', `Video süresi: ${videoDuration.toFixed(2)} sn`);
+    // If we have HTML5 metadata, use it; otherwise, we'll use FFmpeg fallback
+    const validVideoDuration = videoDuration ?? null;
+    hasHtml5MetadataRef.current = validVideoDuration !== null && validVideoDuration > 0;
+    videoDurationRef.current = validVideoDuration;
+    
+    if (validVideoDuration !== null && validVideoDuration > 0) {
+      addLog?.('info', 'Convert', `Video süresi (HTML5): ${validVideoDuration.toFixed(2)} sn`);
+    } else {
+      addLog?.('info', 'Convert', 'Video süresi: FFmpeg fallback kullanılacak');
     }
     if (sourceWidth && sourceHeight) {
       addLog?.('info', 'Convert', `Çözünürlük: ${sourceWidth}x${sourceHeight}`);
@@ -566,7 +577,8 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
       errorCode: null,
       errorMessage: null,
       cleanupStatus: 'idle',
-      totalDuration: videoDuration ?? null,
+      totalDuration: validVideoDuration,
+      metadataSource: hasHtml5MetadataRef.current ? 'html5' : null,
     });
 
     // Get quality preset settings
@@ -680,6 +692,7 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
     // Audio detection flag
     let hasAudioDetected = false;
     let conversionSucceeded = false;
+    let ffmpegFallbackLogged = false;
 
     // FFmpeg log handler
     const ffmpegLogHandler = ({ message }: { message: string }) => {
@@ -704,6 +717,25 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
         // Update last encoded time reference
         if (stats.encodedTime !== null) {
           lastEncodedTimeRef.current = stats.encodedTime;
+          
+          // Track max encoded time for FFmpeg fallback
+          if (stats.encodedTime > maxEncodedTimeRef.current) {
+            maxEncodedTimeRef.current = stats.encodedTime;
+          }
+          
+          // If HTML5 metadata failed, use FFmpeg fallback for total duration
+          if (!hasHtml5MetadataRef.current && videoDurationRef.current === null && maxEncodedTimeRef.current > 0) {
+            // Use the max encoded time as the total duration
+            videoDurationRef.current = maxEncodedTimeRef.current;
+            updateDebugInfo?.({ 
+              totalDuration: maxEncodedTimeRef.current,
+              metadataSource: 'ffmpeg_fallback',
+            });
+            if (!ffmpegFallbackLogged) {
+              ffmpegFallbackLogged = true;
+              addLog?.('info', 'Convert', `Video süresi (FFmpeg fallback): ${maxEncodedTimeRef.current.toFixed(2)} sn`);
+            }
+          }
         }
 
         updateDebugInfo?.({
@@ -863,6 +895,24 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
           if (stats) {
             if (stats.encodedTime !== null) {
               lastEncodedTimeRef.current = stats.encodedTime;
+              
+              // Track max encoded time for FFmpeg fallback
+              if (stats.encodedTime > maxEncodedTimeRef.current) {
+                maxEncodedTimeRef.current = stats.encodedTime;
+              }
+              
+              // If HTML5 metadata failed, use FFmpeg fallback for total duration
+              if (!hasHtml5MetadataRef.current && videoDurationRef.current === null && maxEncodedTimeRef.current > 0) {
+                videoDurationRef.current = maxEncodedTimeRef.current;
+                updateDebugInfo?.({ 
+                  totalDuration: maxEncodedTimeRef.current,
+                  metadataSource: 'ffmpeg_fallback',
+                });
+                if (!ffmpegFallbackLogged) {
+                  ffmpegFallbackLogged = true;
+                  addLog?.('info', 'Convert', `Video süresi (FFmpeg fallback): ${maxEncodedTimeRef.current.toFixed(2)} sn`);
+                }
+              }
             }
             updateDebugInfo?.({
               encodedFrame: stats.encodedFrame,

@@ -241,6 +241,10 @@ export function DebugPanel({ debugInfo, isVisible }: DebugPanelProps) {
                   : null} 
               />
               <DebugRow 
+                label="Metadata Source" 
+                value={debugInfo.metadataSource === 'html5' ? 'HTML5 Video' : debugInfo.metadataSource === 'ffmpeg_fallback' ? 'FFmpeg Fallback' : null} 
+              />
+              <DebugRow 
                 label="Encoding Hızı" 
                 value={debugInfo.encodingSpeed !== null ? `${debugInfo.encodingSpeed.toFixed(3)}x` : null} 
               />

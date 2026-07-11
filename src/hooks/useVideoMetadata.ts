@@ -11,6 +11,11 @@ interface UseVideoMetadataResult {
   isLoading: boolean;
 }
 
+// Validate duration - must be a valid positive number
+function isValidDuration(duration: number): boolean {
+  return !isNaN(duration) && isFinite(duration) && duration > 0;
+}
+
 export function useVideoMetadata(): UseVideoMetadataResult & {
   loadMetadata: (file: File) => void;
   reset: () => void;
@@ -63,6 +68,19 @@ export function useVideoMetadata(): UseVideoMetadataResult & {
     };
 
     video.onloadedmetadata = () => {
+      // Validate duration - reject NaN, Infinity, or 0
+      if (!isValidDuration(video.duration)) {
+        // Duration is invalid - fail silently, let FFmpeg handle it
+        setState({
+          metadata: null,
+          previewUrl: null,
+          error: null,
+          isLoading: false,
+        });
+        cleanup();
+        return;
+      }
+      
       setState({
         metadata: {
           name: file.name,
@@ -80,10 +98,11 @@ export function useVideoMetadata(): UseVideoMetadataResult & {
     };
 
     video.onerror = () => {
+      // Silent failure - no error shown to user
       setState({
         metadata: null,
         previewUrl: null,
-        error: 'Video dosyası okunamadı veya bozuk olabilir.',
+        error: null,
         isLoading: false,
       });
       cleanup();
@@ -160,6 +179,23 @@ export function useVideoMetadataState(
     video.src = url;
 
     const onMetadata = () => {
+      // Validate duration - reject NaN, Infinity, or 0
+      if (!isValidDuration(video.duration)) {
+        // Duration is invalid - fail silently, let FFmpeg handle it
+        if (!hasWarnedRef.current) {
+          hasWarnedRef.current = true;
+          console.warn('[WebmConverter] Invalid video duration from HTML5, using FFmpeg fallback');
+        }
+        setState({
+          metadata: null,
+          previewUrl: null,
+          error: null,
+          isLoading: false,
+        });
+        cleanup();
+        return;
+      }
+
       const metadata: VideoMetadata = {
         name: file.name,
         size: file.size,
@@ -179,19 +215,16 @@ export function useVideoMetadataState(
     };
 
     const onError = () => {
-      // Don't show error for WebM files - some browsers can't preview them
-      // but FFmpeg can still convert them
+      // Silent failure - no error shown to user, let FFmpeg handle it
       if (!hasWarnedRef.current) {
         hasWarnedRef.current = true;
-        console.warn('[WebmConverter] Video preview unavailable, but file will be processed by FFmpeg');
+        console.warn('[WebmConverter] HTML5 metadata read failed, using FFmpeg fallback');
       }
       
-      // Still try to load the file - some browsers trigger onerror
-      // even when the file is valid WebM
       setState({
         metadata: null,
         previewUrl: null,
-        error: null, // Don't show error, let FFmpeg handle it
+        error: null,
         isLoading: false,
       });
       cleanup();

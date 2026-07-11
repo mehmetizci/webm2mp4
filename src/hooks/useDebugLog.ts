@@ -35,6 +35,8 @@ export interface ConversionDebugInfo {
   duplicatedFrames: number | null;
   // Total video duration
   totalDuration: number | null;
+  // Metadata source (how duration was obtained)
+  metadataSource: 'html5' | 'ffmpeg_fallback' | null;
   // Output read status
   outputReadStatus: 'idle' | 'reading' | 'read' | 'error';
   // Compression stats
@@ -249,6 +251,8 @@ const initialDebugInfo: ConversionDebugInfo = {
   duplicatedFrames: null,
   // Total video duration
   totalDuration: null,
+  // Metadata source
+  metadataSource: null,
   // Output read status
   outputReadStatus: 'idle',
   // Compression stats
