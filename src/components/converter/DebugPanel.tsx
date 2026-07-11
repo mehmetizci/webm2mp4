@@ -160,6 +160,54 @@ export function DebugPanel({ debugInfo, isVisible }: DebugPanelProps) {
             <DebugRow label="MIME Type" value={debugInfo.fileMimeType} />
           </DebugSection>
 
+          {/* WebCodecs Capabilities */}
+          <DebugSection title="WebCodecs Yetenekleri">
+            <DebugRow 
+              label="Secure Context" 
+              value={debugInfo.webCodecsSecureContext === true ? 'Evet' : debugInfo.webCodecsSecureContext === false ? 'Hayır' : 'Bilinmiyor'} 
+              status={debugInfo.webCodecsSecureContext === true ? 'completed' : debugInfo.webCodecsSecureContext === false ? 'error' : undefined}
+            />
+            <DebugRow 
+              label="VideoEncoder" 
+              value={debugInfo.webCodecsVideoEncoder === true ? 'Mevcut' : debugInfo.webCodecsVideoEncoder === false ? 'Yok' : 'Bilinmiyor'} 
+              status={debugInfo.webCodecsVideoEncoder === true ? 'completed' : debugInfo.webCodecsVideoEncoder === false ? 'error' : undefined}
+            />
+            <DebugRow 
+              label="VideoDecoder" 
+              value={debugInfo.webCodecsVideoDecoder === true ? 'Mevcut' : debugInfo.webCodecsVideoDecoder === false ? 'Yok' : 'Bilinmiyor'} 
+              status={debugInfo.webCodecsVideoDecoder === true ? 'completed' : debugInfo.webCodecsVideoDecoder === false ? 'error' : undefined}
+            />
+            <DebugRow 
+              label="VideoFrame" 
+              value={debugInfo.webCodecsVideoFrame === true ? 'Mevcut' : debugInfo.webCodecsVideoFrame === false ? 'Yok' : 'Bilinmiyor'} 
+              status={debugInfo.webCodecsVideoFrame === true ? 'completed' : debugInfo.webCodecsVideoFrame === false ? 'error' : undefined}
+            />
+            <DebugRow 
+              label="H.264 Encoder" 
+              value={debugInfo.webCodecsH264Supported === true ? 'Destekleniyor' : debugInfo.webCodecsH264Supported === false ? 'Desteklenmiyor' : 'Bilinmiyor'} 
+              status={debugInfo.webCodecsH264Supported === true ? 'completed' : debugInfo.webCodecsH264Supported === false ? 'error' : undefined}
+            />
+            {debugInfo.webCodecsTestedCodec && (
+              <DebugRow 
+                label="Test Edilen Codec" 
+                value={debugInfo.webCodecsTestedCodec} 
+              />
+            )}
+            {debugInfo.webCodecsHardwareAcceleration && (
+              <DebugRow 
+                label="Hardware Acceleration" 
+                value={debugInfo.webCodecsHardwareAcceleration} 
+              />
+            )}
+            {debugInfo.webCodecsFailureDetails && (
+              <DebugRow 
+                label="Hata Detayı" 
+                value={debugInfo.webCodecsFailureDetails} 
+                status="error"
+              />
+            )}
+          </DebugSection>
+
           {/* Conversion Engine Info */}
           <DebugSection title="Dönüşüm Motoru">
             <DebugRow 
@@ -167,23 +215,12 @@ export function DebugPanel({ debugInfo, isVisible }: DebugPanelProps) {
               value={debugInfo.selectedEngine === 'webcodecs' ? 'WebCodecs' : debugInfo.selectedEngine === 'ffmpeg' ? 'FFmpeg WebAssembly' : null} 
             />
             <DebugRow 
-              label="WebCodecs API Mevcut" 
+              label="H.264 Destekli" 
               value={debugInfo.webCodecsSupported ? 'Evet' : 'Hayır'} 
               status={debugInfo.webCodecsSupported ? 'completed' : 'error'}
             />
             <DebugRow 
-              label="H.264 Encoder" 
-              value={debugInfo.webCodecsH264Supported === true ? 'Destekleniyor' : debugInfo.webCodecsH264Supported === false ? 'Desteklenmiyor' : null} 
-              status={debugInfo.webCodecsH264Supported === true ? 'completed' : debugInfo.webCodecsH264Supported === false ? 'error' : undefined}
-            />
-            {debugInfo.webCodecsHardwareAcceleration && (
-              <DebugRow 
-                label="Hardware Acceleration" 
-                value={debugInfo.webCodecsHardwareAcceleration} 
-              />
-            )}
-            <DebugRow 
-              label="Gerçekte Kullanılan Motor" 
+              label="Gerçekte Kullanılan" 
               value={debugInfo.actualEngineUsed === 'webcodecs' ? 'WebCodecs' : debugInfo.actualEngineUsed === 'ffmpeg' ? 'FFmpeg WebAssembly' : null} 
             />
           </DebugSection>

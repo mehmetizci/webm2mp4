@@ -19,11 +19,20 @@ export interface ConversionDebugInfo {
   fileMimeType: string | null;
   // Conversion engine selection
   selectedEngine: 'webcodecs' | 'ffmpeg' | null;
+  actualEngineUsed: 'webcodecs' | 'ffmpeg' | null;
+  // WebCodecs detailed capabilities
+  webCodecsSecureContext: boolean | null;
+  webCodecsVideoEncoder: boolean | null;
+  webCodecsVideoDecoder: boolean | null;
+  webCodecsVideoFrame: boolean | null;
+  webCodecsMediaRecorder: boolean | null;
   webCodecsSupported: boolean;
   webCodecsSupportReason: string | null;
+  webCodecsFailureDetails: string | null;
   webCodecsH264Supported: boolean | null;
+  webCodecsH264BaselineSupported: boolean | null;
+  webCodecsTestedCodec: string | null;
   webCodecsHardwareAcceleration: string | null;
-  actualEngineUsed: 'webcodecs' | 'ffmpeg' | null;
   // FFmpeg load status
   ffmpegLoadStatus: 'idle' | 'loading' | 'loaded' | 'error';
   coreJsLoadStatus: 'idle' | 'loading' | 'loaded' | 'error';
@@ -243,11 +252,20 @@ const initialDebugInfo: ConversionDebugInfo = {
   fileMimeType: null,
   // Conversion engine selection
   selectedEngine: null,
+  actualEngineUsed: null,
+  // WebCodecs detailed capabilities
+  webCodecsSecureContext: null,
+  webCodecsVideoEncoder: null,
+  webCodecsVideoDecoder: null,
+  webCodecsVideoFrame: null,
+  webCodecsMediaRecorder: null,
   webCodecsSupported: false,
   webCodecsSupportReason: null,
+  webCodecsFailureDetails: null,
   webCodecsH264Supported: null,
+  webCodecsH264BaselineSupported: null,
+  webCodecsTestedCodec: null,
   webCodecsHardwareAcceleration: null,
-  actualEngineUsed: null,
   // FFmpeg load status
   ffmpegLoadStatus: 'idle',
   coreJsLoadStatus: 'idle',

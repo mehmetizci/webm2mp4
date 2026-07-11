@@ -113,19 +113,54 @@ export function WebmConverter() {
   // Check WebCodecs support on mount
   useEffect(() => {
     const checkSupport = async () => {
-      const support = await checkWebCodecsSupport();
-      setWebCodecsSupport(support);
+      const { getWebCodecsCapabilities } = await import('@/lib/converters/webCodecsSupport');
+      const capabilities = await getWebCodecsCapabilities();
       
-      // Update debug info
+      // Map failure reason to ConverterSupportReason
+      let reason: 'WEB_CODECS_API_UNAVAILABLE' | 'H264_ENCODER_UNSUPPORTED' | 'WEB_CODECS_CHECK_FAILED' | null = null;
+      if (capabilities.failureReason) {
+        if (!capabilities.videoEncoder || !capabilities.videoDecoder || !capabilities.videoFrame) {
+          reason = 'WEB_CODECS_API_UNAVAILABLE';
+        } else if (!capabilities.h264Supported) {
+          reason = 'H264_ENCODER_UNSUPPORTED';
+        } else {
+          reason = 'WEB_CODECS_CHECK_FAILED';
+        }
+      }
+      
+      // Update WebCodecsSupport state for UI
+      setWebCodecsSupport({
+        checking: false,
+        supported: capabilities.h264Supported,
+        reason,
+        details: {
+          hasVideoDecoder: capabilities.videoDecoder,
+          hasVideoEncoder: capabilities.videoEncoder,
+          hasVideoFrame: capabilities.videoFrame,
+          hasEncodedVideoChunk: capabilities.videoFrame, // Approximate
+          h264Supported: capabilities.h264Supported,
+          hardwareAcceleration: capabilities.hardwareAcceleration,
+        },
+      });
+      
+      // Update debug info with detailed capabilities
       updateDebugInfo({
-        webCodecsSupported: support.supported,
-        webCodecsSupportReason: support.reason,
-        webCodecsH264Supported: support.details?.h264Supported ?? null,
-        webCodecsHardwareAcceleration: support.details?.hardwareAcceleration ?? null,
+        webCodecsSecureContext: capabilities.secureContext,
+        webCodecsVideoEncoder: capabilities.videoEncoder,
+        webCodecsVideoDecoder: capabilities.videoDecoder,
+        webCodecsVideoFrame: capabilities.videoFrame,
+        webCodecsMediaRecorder: capabilities.mediaRecorder,
+        webCodecsSupported: capabilities.h264Supported,
+        webCodecsSupportReason: capabilities.failureReason,
+        webCodecsFailureDetails: capabilities.errorDetails,
+        webCodecsH264Supported: capabilities.h264Supported,
+        webCodecsH264BaselineSupported: capabilities.h264BaselineSupported,
+        webCodecsTestedCodec: capabilities.testedCodec,
+        webCodecsHardwareAcceleration: capabilities.hardwareAcceleration,
       });
       
       // Auto-select based on support and localStorage preference
-      if (support.supported) {
+      if (capabilities.h264Supported) {
         const savedEngine = localStorage.getItem(STORAGE_KEY);
         if (savedEngine === 'webcodecs' || !savedEngine) {
           setConversionEngine('webcodecs');
