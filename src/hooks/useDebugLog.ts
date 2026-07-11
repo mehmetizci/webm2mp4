@@ -33,6 +33,8 @@ export interface ConversionDebugInfo {
   webCodecsH264BaselineSupported: boolean | null;
   webCodecsTestedCodec: string | null;
   webCodecsHardwareAcceleration: string | null;
+  webCodecsDetectionTimeMs: number | null;
+  webCodecsTimedOut: boolean | null;
   // FFmpeg load status
   ffmpegLoadStatus: 'idle' | 'loading' | 'loaded' | 'error';
   coreJsLoadStatus: 'idle' | 'loading' | 'loaded' | 'error';
@@ -266,6 +268,8 @@ const initialDebugInfo: ConversionDebugInfo = {
   webCodecsH264BaselineSupported: null,
   webCodecsTestedCodec: null,
   webCodecsHardwareAcceleration: null,
+  webCodecsDetectionTimeMs: null,
+  webCodecsTimedOut: null,
   // FFmpeg load status
   ffmpegLoadStatus: 'idle',
   coreJsLoadStatus: 'idle',

@@ -170,6 +170,8 @@ export function WebmConverter() {
           webCodecsH264BaselineSupported: capabilities.h264BaselineSupported,
           webCodecsTestedCodec: capabilities.testedCodec,
           webCodecsHardwareAcceleration: capabilities.hardwareAcceleration,
+          webCodecsDetectionTimeMs: capabilities.detectionTimeMs,
+          webCodecsTimedOut: capabilities.timedOut,
         });
         
         // Auto-select based on support and localStorage preference
@@ -215,6 +217,8 @@ export function WebmConverter() {
           webCodecsH264BaselineSupported: false,
           webCodecsTestedCodec: null,
           webCodecsHardwareAcceleration: null,
+          webCodecsDetectionTimeMs: null,
+          webCodecsTimedOut: true,
         });
         
         setConversionEngine('ffmpeg');

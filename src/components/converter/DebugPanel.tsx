@@ -207,6 +207,20 @@ export function DebugPanel({ debugInfo, isVisible }: DebugPanelProps) {
                     value={debugInfo.webCodecsHardwareAcceleration} 
                   />
                 )}
+                {debugInfo.webCodecsTimedOut && (
+                  <DebugRow 
+                    label="Timeout" 
+                    value="Evet" 
+                    status="warning"
+                  />
+                )}
+                {debugInfo.webCodecsDetectionTimeMs !== null && (
+                  <DebugRow 
+                    label="Tespit Süresi" 
+                    value={`${debugInfo.webCodecsDetectionTimeMs} ms`} 
+                    status={debugInfo.webCodecsTimedOut ? 'warning' : undefined}
+                  />
+                )}
                 {debugInfo.webCodecsFailureDetails && (
                   <DebugRow 
                     label="Hata Detayı" 
