@@ -543,35 +543,25 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
       throw err; // Re-throw ORIGINAL error with full context
     }
 
-    // Step 3: Use provided mediaInfo or analyze if not provided
-    let parsedMediaInfo = mediaInfo;
+    // Step 3: Use provided mediaInfo (analysis already done by parent component)
+    const parsedMediaInfo = mediaInfo;
     if (!parsedMediaInfo) {
-      onStageChange?.('analyzing');
-      updateProgress(5, 'analyzing', false);
-      addLog?.('info', 'Convert', 'Medya analizi başlatılıyor...');
-      
-      try {
-        parsedMediaInfo = await parseMediaInfo(ffmpeg, file, INPUT_FILE);
-        addLog?.('success', 'Convert', `ANALYSIS_SUCCESS: ${parsedMediaInfo.resolution || 'bilinmiyor'}, sesli: ${parsedMediaInfo.hasAudio}`);
-      } catch (err) {
-        const { message, stack } = normalizeError(err);
-        addLog?.('error', 'Convert', `ANALYSIS_FAILED: ${message}`, { stack, originalError: err });
-        updateDebugInfo?.({ 
-          errorMessage: `Medya analizi başarısız: ${message}`, 
-          errorStack: stack 
-        });
-        const errorObj: ConversionError = {
-          code: 'ANALYSIS_ERROR',
-          message: 'Medya analizi başarısız.',
-          technical: `parseMediaInfo() başarısız\n${message}\nStack: ${stack || 'yok'}`,
-        };
-        setError(errorObj);
-        onStageChange?.('error');
-        throw err; // Re-throw ORIGINAL error
-      }
-    } else {
-      addLog?.('info', 'Convert', `Medya bilgisi zaten mevcut: ${parsedMediaInfo.resolution || 'bilinmiyor'}, sesli: ${parsedMediaInfo.hasAudio}`);
+      const err = new Error('Medya bilgisi bulunamadı - lütfen dosyayı tekrar seçin');
+      addLog?.('error', 'Convert', `MEDIA_INFO_MISSING: ${err.message}`);
+      updateDebugInfo?.({ 
+        errorMessage: err.message, 
+        errorStack: err.stack 
+      });
+      const errorObj: ConversionError = {
+        code: 'MEDIA_INFO_MISSING',
+        message: err.message,
+        technical: `mediaInfo is null - analysis was not completed before convert()`,
+      };
+      setError(errorObj);
+      onStageChange?.('error');
+      throw err;
     }
+    addLog?.('info', 'Convert', `Medya bilgisi kullanılıyor: ${parsedMediaInfo.resolution || 'bilinmiyor'}, sesli: ${parsedMediaInfo.hasAudio}`);
 
     if (parsedMediaInfo.hasAudio && !validation.aac) {
       const err = new Error('AAC encoder mevcut değil - video sesli');
