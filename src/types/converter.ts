@@ -29,6 +29,7 @@ export interface ConversionProgress {
   hasProgress?: boolean; // Whether actual progress events have been received
   encodedTime?: number | null; // Video time encoded so far (seconds)
   encodingSpeed?: number | null; // Current encoding speed (e.g., 0.125x)
+  totalDuration?: number | null; // Total video duration in seconds
 }
 
 export type ConversionStage =

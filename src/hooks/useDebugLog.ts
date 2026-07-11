@@ -33,6 +33,8 @@ export interface ConversionDebugInfo {
   encodingFps: number | null;
   encodingSpeed: number | null;
   duplicatedFrames: number | null;
+  // Total video duration
+  totalDuration: number | null;
   // Output read status
   outputReadStatus: 'idle' | 'reading' | 'read' | 'error';
   // Compression stats
@@ -245,6 +247,8 @@ const initialDebugInfo: ConversionDebugInfo = {
   encodingFps: null,
   encodingSpeed: null,
   duplicatedFrames: null,
+  // Total video duration
+  totalDuration: null,
   // Output read status
   outputReadStatus: 'idle',
   // Compression stats

@@ -130,6 +130,7 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
     hasProgress: false,
     encodedTime: null,
     encodingSpeed: null,
+    totalDuration: null,
   });
   const [error, setError] = useState<ConversionError | null>(null);
 
@@ -160,7 +161,8 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
     stage: ConversionStage, 
     hasProgress = true,
     encodedTime?: number | null,
-    encodingSpeed?: number | null
+    encodingSpeed?: number | null,
+    totalDuration?: number | null
   ) => {
     const elapsed = (Date.now() - startTimeRef.current) / 1000;
     setProgress(prev => ({
@@ -170,6 +172,7 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
       hasProgress,
       encodedTime: encodedTime !== undefined ? encodedTime : prev.encodedTime,
       encodingSpeed: encodingSpeed !== undefined ? encodingSpeed : prev.encodingSpeed,
+      totalDuration: totalDuration !== undefined ? totalDuration : prev.totalDuration,
     }));
   }, []);
 
@@ -563,6 +566,7 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
       errorCode: null,
       errorMessage: null,
       cleanupStatus: 'idle',
+      totalDuration: videoDuration ?? null,
     });
 
     // Get quality preset settings
@@ -627,7 +631,7 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
   
     // Step 3: Execute FFmpeg
     onStageChange?.('converting');
-    updateProgress(10, 'converting', false, null, null);
+    updateProgress(0, 'converting', false, null, null, videoDurationRef.current);
     const execStartTime = Date.now();
     addLog?.('info', 'Convert', 'EXEC_STARTED');
     updateDebugInfo?.({ ffmpegExecStatus: 'running', ffmpegExecStartTime: execStartTime });
@@ -644,17 +648,21 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
     let maxDuplicatedFrames = 0;
     let hasWarnedAboutDuplicates = false;
     let hasRetriedWithFallback = false;
-    let lastProgressPercent = 10;
+    let lastProgressPercent = 0;
 
     // Calculate progress percentage based on encoded time and video duration
+    // Formula: (encodedTime / totalDuration) * 100
+    // Caps at 99% until completion, never goes backwards
     const calculateProgressPercent = (encodedTime: number | null): number => {
-      if (encodedTime === null || videoDurationRef.current === null || videoDurationRef.current <= 0) {
+      const duration = videoDurationRef.current;
+      if (encodedTime === null || duration === null || duration <= 0) {
+        // No duration info - return current progress or 0
         return lastProgressPercent;
       }
-      const duration = videoDurationRef.current;
-      // Formula: start at 10%, end at 95%, scale encoded time to duration ratio
-      const ratio = Math.min(encodedTime / duration, 1);
-      return Math.min(95, Math.max(10, 10 + ratio * 85));
+      const rawPercent = (encodedTime / duration) * 100;
+      const newPercent = Math.floor(Math.min(99, rawPercent));
+      // Progress never goes backwards
+      return Math.max(lastProgressPercent, newPercent);
     };
 
     // Progress handler
@@ -663,7 +671,7 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
       const normalizedProgress = data.progress;
       if (normalizedProgress > 0 && normalizedProgress <= 1) {
         lastProgressPercent = calculateProgressPercent(null);
-        updateProgress(lastProgressPercent, 'converting', true, null, null);
+        updateProgress(lastProgressPercent, 'converting', true, null, null, videoDurationRef.current);
         updateDebugInfo?.({ lastProgressValue: lastProgressPercent });
       }
     };
@@ -719,11 +727,11 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
         // Update progress based on encoded time if we have video duration
         if (stats.encodedTime !== null) {
           lastProgressPercent = calculateProgressPercent(stats.encodedTime);
-          updateProgress(lastProgressPercent, 'converting', true, stats.encodedTime, stats.encodingSpeed);
+          updateProgress(lastProgressPercent, 'converting', true, stats.encodedTime, stats.encodingSpeed, videoDurationRef.current);
           updateDebugInfo?.({ lastProgressValue: lastProgressPercent });
         } else if (stats.encodedFrame !== null && stats.encodedFrame > 0) {
           // Fallback: animate progress for unknown duration
-          updateProgress(lastProgressPercent, 'converting', true, null, stats.encodingSpeed);
+          updateProgress(lastProgressPercent, 'converting', true, null, stats.encodingSpeed, videoDurationRef.current);
         }
       }
 
@@ -840,7 +848,7 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
           const normalizedProgress = data.progress;
           if (normalizedProgress > 0 && normalizedProgress <= 1) {
             lastProgressPercent = calculateProgressPercent(null);
-            updateProgress(lastProgressPercent, 'converting', true);
+            updateProgress(lastProgressPercent, 'converting', true, null, null, videoDurationRef.current);
             updateDebugInfo?.({ lastProgressValue: lastProgressPercent });
           }
         };
@@ -868,7 +876,7 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
             }
             if (stats.encodedTime !== null) {
               lastProgressPercent = calculateProgressPercent(stats.encodedTime);
-              updateProgress(lastProgressPercent, 'converting', true, stats.encodedTime, stats.encodingSpeed);
+              updateProgress(lastProgressPercent, 'converting', true, stats.encodedTime, stats.encodingSpeed, videoDurationRef.current);
             }
           }
           addLog?.('info', 'FFmpeg', message);
@@ -922,7 +930,7 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
 
     // Step 4: Read output
     onStageChange?.('finalizing');
-    updateProgress(95, 'finalizing', true);
+    updateProgress(99, 'finalizing', true, null, null, videoDurationRef.current);
     addLog?.('info', 'Convert', 'MP4 okunuyor...');
     
     let outputData: Uint8Array | string;
@@ -950,7 +958,7 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
     }
 
     onStageChange?.('complete');
-    updateProgress(100, 'complete', true);
+    updateProgress(100, 'complete', true, null, null, videoDurationRef.current);
 
     // Keep all debug statuses as completed (don't reset to idle)
     updateDebugInfo?.({
@@ -1064,7 +1072,7 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
       cleanupStatus: 'completed',
     });
     
-    setProgress({ percent: 0, time: 0, stage: 'idle', hasProgress: false });
+    setProgress({ percent: 0, time: 0, stage: 'idle', hasProgress: false, encodedTime: null, encodingSpeed: null, totalDuration: null });
   }, [clearAllTimeouts, updateDebugInfo]);
 
   return {

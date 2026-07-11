@@ -227,8 +227,18 @@ export function DebugPanel({ debugInfo, isVisible }: DebugPanelProps) {
           {(debugInfo.encodedTime !== null || debugInfo.encodingSpeed !== null) && (
             <DebugSection title="Encoding İstatistikleri">
               <DebugRow 
+                label="Toplam Video Süresi" 
+                value={formatEncodedTime(debugInfo.totalDuration ?? null)} 
+              />
+              <DebugRow 
                 label="İşlenen Video Süresi" 
                 value={formatEncodedTime(debugInfo.encodedTime ?? null)} 
+              />
+              <DebugRow 
+                label="Gerçek Progress (%)" 
+                value={debugInfo.encodedTime !== null && debugInfo.totalDuration !== null && debugInfo.totalDuration > 0 
+                  ? `${Math.min(99, Math.floor((debugInfo.encodedTime / debugInfo.totalDuration) * 100))}%` 
+                  : null} 
               />
               <DebugRow 
                 label="Encoding Hızı" 

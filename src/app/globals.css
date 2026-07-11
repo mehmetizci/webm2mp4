@@ -24,6 +24,21 @@
   }
 }
 
+/* Indeterminate progress animation */
+@keyframes slide {
+  0% {
+    transform: translateX(-100%);
+    width: 30%;
+  }
+  50% {
+    width: 50%;
+  }
+  100% {
+    transform: translateX(350%);
+    width: 30%;
+  }
+}
+
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
