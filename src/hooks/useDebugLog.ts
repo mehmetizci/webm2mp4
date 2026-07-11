@@ -42,6 +42,9 @@ export interface ConversionDebugInfo {
   videoBitrate: number | null;
   audioBitrate: number | null;
   totalBitrate: number | null;
+  // Encoding stats
+  encodeTime: number | null;
+  averageSpeed: number | null;
   lastLogLines: string[];
   errorCode: string | null;
   errorMessage: string | null;
@@ -240,6 +243,9 @@ const initialDebugInfo: ConversionDebugInfo = {
   videoBitrate: null,
   audioBitrate: null,
   totalBitrate: null,
+  // Encoding stats
+  encodeTime: null,
+  averageSpeed: null,
   lastLogLines: [],
   errorCode: null,
   errorMessage: null,

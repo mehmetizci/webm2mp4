@@ -59,6 +59,9 @@ export interface ConversionResult {
   videoBitrate?: number; // kbps
   audioBitrate?: number; // kbps
   totalBitrate?: number; // kbps
+  // Encoding stats
+  encodeTime?: number; // seconds
+  averageSpeed?: number; // e.g., 0.44x
 }
 
 export interface ConversionError {

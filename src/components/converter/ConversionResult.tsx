@@ -1,6 +1,6 @@
 'use client';
 
-import { CheckCircle, Download, RefreshCw, Film, ArrowDownCircle } from 'lucide-react';
+import { CheckCircle, Download, RefreshCw, Film, ArrowDownCircle, Clock, Gauge } from 'lucide-react';
 import type { ConversionResult as ResultType } from '@/types/converter';
 import { formatFileSize } from '@/lib/file-utils';
 import { formatTime } from '@/lib/format-utils';
@@ -15,6 +15,15 @@ function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(2)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+}
+
+function formatEncodeTime(seconds: number): string {
+  if (seconds < 60) {
+    return `${Math.round(seconds)} sn`;
+  }
+  const mins = Math.floor(seconds / 60);
+  const secs = Math.round(seconds % 60);
+  return `${mins} dk ${secs} sn`;
 }
 
 export function ConversionResult({ result, onReset }: ConversionResultProps) {
@@ -49,40 +58,66 @@ export function ConversionResult({ result, onReset }: ConversionResultProps) {
         <div className="w-full max-w-xs bg-white rounded-xl p-4 space-y-3">
           <div className="flex items-center gap-2 text-sm font-medium text-slate-700">
             <ArrowDownCircle className="w-4 h-4 text-emerald-600" />
-            Sıkıştırma Özeti
+            Dönüşüm Özeti
           </div>
           <div className="grid grid-cols-2 gap-4 text-xs">
             <div className="space-y-1">
-              <span className="text-slate-500">Giriş</span>
+              <span className="text-slate-500">Input</span>
               <p className="font-mono text-slate-700">{formatBytes(result.inputSize)}</p>
             </div>
             <div className="space-y-1">
-              <span className="text-slate-500">Çıkış</span>
+              <span className="text-slate-500">Output</span>
               <p className="font-mono text-slate-700">{formatBytes(result.outputSize)}</p>
             </div>
           </div>
           <div className="flex items-center justify-between pt-2 border-t border-slate-100">
-            <span className="text-sm font-medium text-emerald-700">Sıkıştırma</span>
+            <span className="text-sm font-medium text-emerald-700">Compression</span>
             <span className="text-lg font-bold text-emerald-700">{result.compressionRatio}%</span>
           </div>
-          {(result.totalBitrate || result.videoBitrate) && (
+          
+          {/* Encoding Stats */}
+          {(result.encodeTime || result.averageSpeed) && (
+            <div className="pt-2 border-t border-slate-100 space-y-2">
+              {result.encodeTime && (
+                <div className="flex items-center justify-between text-xs">
+                  <div className="flex items-center gap-1.5 text-slate-500">
+                    <Clock className="w-3.5 h-3.5" />
+                    <span>Encode Time</span>
+                  </div>
+                  <span className="font-mono text-slate-700">{formatEncodeTime(result.encodeTime)}</span>
+                </div>
+              )}
+              {result.averageSpeed && (
+                <div className="flex items-center justify-between text-xs">
+                  <div className="flex items-center gap-1.5 text-slate-500">
+                    <Gauge className="w-3.5 h-3.5" />
+                    <span>Average Speed</span>
+                  </div>
+                  <span className="font-mono text-slate-700">{result.averageSpeed.toFixed(2)}x</span>
+                </div>
+              )}
+            </div>
+          )}
+          
+          {/* Bitrate Stats */}
+          {(result.totalBitrate || result.videoBitrate || result.audioBitrate) && (
             <div className="pt-2 border-t border-slate-100 text-xs text-slate-500 space-y-1">
               {result.videoBitrate && (
                 <div className="flex justify-between">
-                  <span>Video Bitrate</span>
-                  <span className="font-mono">{result.videoBitrate.toFixed(0)} kbps</span>
+                  <span>Final Video Bitrate</span>
+                  <span className="font-mono text-slate-700">{result.videoBitrate.toFixed(0)} kbps</span>
                 </div>
               )}
               {result.audioBitrate && (
                 <div className="flex justify-between">
-                  <span>Ses Bitrate</span>
-                  <span className="font-mono">{result.audioBitrate} kbps</span>
+                  <span>Final Audio Bitrate</span>
+                  <span className="font-mono text-slate-700">{result.audioBitrate} kbps</span>
                 </div>
               )}
               {result.totalBitrate && (
                 <div className="flex justify-between">
-                  <span>Toplam Bitrate</span>
-                  <span className="font-mono">{result.totalBitrate.toFixed(0)} kbps</span>
+                  <span>Total Bitrate</span>
+                  <span className="font-mono text-slate-700">{result.totalBitrate.toFixed(0)} kbps</span>
                 </div>
               )}
             </div>

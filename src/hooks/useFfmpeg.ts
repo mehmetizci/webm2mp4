@@ -458,8 +458,9 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
     // Step 3: Execute FFmpeg
     onStageChange?.('converting');
     updateProgress(10, 'converting', false, null, null);
+    const execStartTime = Date.now();
     addLog?.('info', 'Convert', 'EXEC_STARTED');
-    updateDebugInfo?.({ ffmpegExecStatus: 'running', ffmpegExecStartTime: Date.now() });
+    updateDebugInfo?.({ ffmpegExecStatus: 'running', ffmpegExecStartTime: execStartTime });
 
     const ffmpegArgs = buildFFmpegArgs(
       crf, 
@@ -497,9 +498,24 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
     };
     ffmpeg.on('progress', progressHandlerRef.current);
 
+    // Audio detection flag
+    let hasAudioDetected = false;
+    let conversionSucceeded = false;
+
     // FFmpeg log handler
     const ffmpegLogHandler = ({ message }: { message: string }) => {
       lastActivityRef.current = Date.now();
+      
+      // Detect audio stream in FFmpeg output
+      if (!hasAudioDetected && /Audio:/i.test(message)) {
+        hasAudioDetected = true;
+        addLog?.('info', 'Convert', 'Audio stream detected - AAC encoding enabled');
+      }
+      
+      // Ignore "Aborted()" messages that occur after successful completion
+      if (conversionSucceeded && /Aborted\(\)/i.test(message)) {
+        return; // Skip logging aborted errors after success
+      }
       
       if (message === lastFFmpegMessageRef.current) return;
       lastFFmpegMessageRef.current = message;
@@ -547,6 +563,13 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
     // Reset activity timer for execution
     lastActivityRef.current = Date.now();
     lastEncodedTimeRef.current = null;
+    
+    // Log audio detection status
+    if (hasAudioDetected) {
+      addLog?.('info', 'Convert', 'Audio stream detected - AAC encoding enabled');
+    } else {
+      addLog?.('info', 'Convert', 'No audio stream detected');
+    }
 
     // Stall timeout - check every 10 seconds
     let stallCheckInterval: ReturnType<typeof setInterval> | null = null;
@@ -768,7 +791,15 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
 
     onStageChange?.('complete');
     updateProgress(100, 'complete', true);
-    updateDebugInfo?.({ ffmpegExecStatus: 'completed', fileWriteStatus: 'written' });
+
+    // Keep all debug statuses as completed (don't reset to idle)
+    updateDebugInfo?.({
+      ffmpegExecStatus: 'completed',
+      fileWriteStatus: 'written',
+      ffmpegLoadStatus: 'loaded',
+      coreJsLoadStatus: 'loaded',
+      wasmLoadStatus: 'loaded',
+    });
 
     let uint8Output: Uint8Array;
     if (outputData instanceof Uint8Array) {
@@ -781,26 +812,31 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
     }
     
     const blob = new Blob([uint8Output.buffer as ArrayBuffer], { type: 'video/mp4' });
-    const duration = (Date.now() - startTimeRef.current) / 1000;
-    const inputSize = fileData.byteLength;
+    const totalDuration = (Date.now() - startTimeRef.current) / 1000;
+    const encodeTime = (Date.now() - execStartTime) / 1000; // Only FFmpeg execution time
+    const inputSize = file.size; // Use original file size for accurate compression calculation
     const outputSize = blob.size;
-    const compressionRatio = Math.round((1 - outputSize / inputSize) * 100);
+    const compressionRatio = Math.round(((inputSize - outputSize) / inputSize) * 100);
     
-    // Calculate bitrates
-    const videoDurationSeconds = videoDurationRef.current ?? (duration * 0.8); // Approximate if not available
+    // Calculate bitrates based on video duration
+    const videoDurationSeconds = videoDurationRef.current ?? encodeTime * 0.8;
     const videoBitrateKbps = videoDurationSeconds > 0 ? (outputSize * 8 / 1000 / videoDurationSeconds) : null;
     const audioBitrateKbps = 96; // Fixed at 96k
     const totalBitrateKbps = videoBitrateKbps !== null ? videoBitrateKbps + audioBitrateKbps : null;
     
-    addLog?.('success', 'Convert', `CONVERSION_COMPLETE: ${duration.toFixed(1)} sn`);
+    // Calculate average encoding speed (video seconds per wall clock second)
+    const averageSpeed = encodeTime > 0 ? (videoDurationSeconds / encodeTime) : null;
+    
+    addLog?.('success', 'Convert', `CONVERSION_COMPLETE: ${totalDuration.toFixed(1)} sn`);
     addLog?.('info', 'Convert', `Input: ${(inputSize / (1024 * 1024)).toFixed(2)}MB`);
     addLog?.('info', 'Convert', `Output: ${(outputSize / (1024 * 1024)).toFixed(2)}MB`);
     addLog?.('info', 'Convert', `Compression: ${compressionRatio}%`);
+    addLog?.('info', 'Convert', `Encode time: ${encodeTime.toFixed(1)}s, Speed: ${averageSpeed?.toFixed(2) ?? '-'}x`);
     if (totalBitrateKbps !== null) {
       addLog?.('info', 'Convert', `Total bitrate: ${totalBitrateKbps.toFixed(0)}kbps`);
     }
 
-    // Update debug info with compression stats
+    // Update debug info with compression and encoding stats
     updateDebugInfo?.({
       inputSize,
       outputSize,
@@ -808,6 +844,8 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
       videoBitrate: videoBitrateKbps,
       audioBitrate: audioBitrateKbps,
       totalBitrate: totalBitrateKbps,
+      encodeTime,
+      averageSpeed,
     });
 
     if (progressHandlerRef.current && ffmpeg) {
@@ -821,17 +859,22 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
       fileDataRef.current = null;
     }
 
+    // Mark conversion as succeeded before returning (used by log handler to ignore abort errors)
+    conversionSucceeded = true;
+
     return {
       blob,
       fileName: getOutputFileName(file.name),
       fileSize: blob.size,
-      duration,
+      duration: totalDuration,
       inputSize,
       outputSize,
       compressionRatio,
       videoBitrate: videoBitrateKbps ?? undefined,
       audioBitrate: audioBitrateKbps,
       totalBitrate: totalBitrateKbps ?? undefined,
+      encodeTime,
+      averageSpeed: averageSpeed ?? undefined,
     };
   }, [updateProgress, clearAllTimeouts, addLog, updateDebugInfo, normalizeError]);
 
