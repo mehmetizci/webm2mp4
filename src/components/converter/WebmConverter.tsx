@@ -143,15 +143,20 @@ export function WebmConverter() {
     addLog('info', 'Conversion', 'Dönüştürme başlatıldı');
 
     try {
+      // FFmpeg zaten yüklü mü kontrol et (state)
       if (!ffmpegLoaded) {
         setStage('loading');
         updateDebugInfo({ ffmpegLoadStatus: 'loading' });
         addLog('info', 'FFmpeg', 'FFmpeg yükleniyor...');
-        await loadFFmpeg();
-      }
-
-      if (!ffmpegLoaded) {
-        throw new Error('FFmpeg yüklenemedi');
+        // loadFFmpeg artık boolean döndürüyor
+        const loadSuccess = await loadFFmpeg();
+        if (!loadSuccess) {
+          // Hata zaten loadFFmpeg içinde ayarlandı
+          addLog('error', 'Conversion', 'FFmpeg yüklenemedi - loadFFmpeg() false döndü');
+          setStage('error');
+          return;
+        }
+        addLog('success', 'Conversion', 'FFmpeg başarıyla yüklendi');
       }
 
       addLog('info', 'Conversion', 'Dönüştürme başlatılıyor');

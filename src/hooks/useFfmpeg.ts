@@ -32,7 +32,7 @@ interface UseFfmpegReturn {
   isLoading: boolean;
   progress: ConversionProgress;
   error: ConversionError | null;
-  loadFFmpeg: () => Promise<void>;
+  loadFFmpeg: () => Promise<boolean>;
   analyzeMedia: (file: File) => Promise<MediaInfo>;
   convert: (
     file: File,
@@ -246,8 +246,22 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
     });
   }, []);
 
-  const loadFFmpeg = useCallback(async () => {
-    if (ffmpegRef.current || isLoading) return;
+  const loadFFmpeg = useCallback(async (): Promise<boolean> => {
+    // Already loaded
+    if (ffmpegRef.current) {
+      addLog?.('info', 'Load', 'FFmpeg zaten yüklü (ffmpegRef mevcut)');
+      return true;
+    }
+    
+    // Already loading
+    if (isLoading) {
+      addLog?.('info', 'Load', 'FFmpeg zaten yükleniyor...');
+      // Wait for existing load to complete
+      while (isLoading) {
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+      return ffmpegRef.current !== null;
+    }
 
     setIsLoading(true);
     setError(null);
@@ -304,7 +318,8 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
 
       setIsLoaded(true);
       updateProgress(0, 'idle', false);
-      addLog?.('success', 'Load', 'FFmpeg hazır');
+      addLog?.('success', 'Load', 'FFmpeg hazır - başarıyla yüklendi');
+      return true;
     } catch (err) {
       console.error('[FFmpeg] Load error:', err);
       const { message, stack } = normalizeError(err);
@@ -338,7 +353,8 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
       };
       setError(errorObj);
       updateProgress(0, 'error', false);
-      throw err; // Re-throw ORIGINAL error
+      addLog?.('error', 'Load', `LOAD_FAILED: FFmpeg yüklenemedi - ${message}`);
+      return false;
     } finally {
       clearTimeout(loadTimeout);
       setIsLoading(false);
