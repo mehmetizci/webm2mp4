@@ -162,7 +162,7 @@ export function WebmConverter() {
   }
 
   const showDropzone = !selectedFile && stage === 'idle';
-  const showFileDetails = selectedFile && metadata && stage === 'idle';
+  const showFileDetails = selectedFile && stage === 'idle';
   const showProgress = stage !== 'idle' && stage !== 'complete' && !conversionError;
   const showResult = result && stage === 'complete';
   const showError = conversionError && stage === 'error';

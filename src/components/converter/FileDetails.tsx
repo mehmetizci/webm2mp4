@@ -6,12 +6,16 @@ import { formatFileSize, formatDuration } from '@/lib/file-utils';
 
 interface FileDetailsProps {
   file: File;
-  metadata: VideoMetadata;
+  metadata: VideoMetadata | null;
   mediaInfo: MediaInfo | null;
   previewUrl: string | null;
 }
 
 export function FileDetails({ file, metadata, mediaInfo, previewUrl }: FileDetailsProps) {
+  // Get info from mediaInfo if metadata is not available
+  const resolution = mediaInfo?.resolution || (metadata ? `${metadata.width}x${metadata.height}` : null);
+  const duration = metadata?.duration || mediaInfo?.duration || null;
+
   return (
     <div className="w-full space-y-4">
       <div className="relative w-full aspect-video bg-black rounded-[10px] overflow-hidden">
@@ -48,7 +52,7 @@ export function FileDetails({ file, metadata, mediaInfo, previewUrl }: FileDetai
             <div>
               <p className="text-[10px] text-[#9CA3AF]">Süre</p>
               <p className="text-xs text-[#374151] font-medium">
-                {formatDuration(metadata.duration)}
+                {duration ? formatDuration(duration) : '--'}
               </p>
             </div>
           </div>
@@ -58,7 +62,7 @@ export function FileDetails({ file, metadata, mediaInfo, previewUrl }: FileDetai
             <div>
               <p className="text-[10px] text-[#9CA3AF]">Çözünürlük</p>
               <p className="text-xs text-[#374151] font-medium">
-                {metadata.width}x{metadata.height}
+                {resolution || '--'}
               </p>
             </div>
           </div>

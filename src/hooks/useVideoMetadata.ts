@@ -120,6 +120,7 @@ export function useVideoMetadataState(
   
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const previewUrlRef = useRef<string | null>(null);
+  const hasWarnedRef = useRef(false);
 
   useEffect(() => {
     const cleanup = () => {
@@ -146,6 +147,7 @@ export function useVideoMetadataState(
     }
 
     setState(prev => ({ ...prev, isLoading: true, error: null }));
+    hasWarnedRef.current = false;
 
     const video = document.createElement('video');
     videoRef.current = video;
@@ -177,10 +179,19 @@ export function useVideoMetadataState(
     };
 
     const onError = () => {
+      // Don't show error for WebM files - some browsers can't preview them
+      // but FFmpeg can still convert them
+      if (!hasWarnedRef.current) {
+        hasWarnedRef.current = true;
+        console.warn('[WebmConverter] Video preview unavailable, but file will be processed by FFmpeg');
+      }
+      
+      // Still try to load the file - some browsers trigger onerror
+      // even when the file is valid WebM
       setState({
         metadata: null,
         previewUrl: null,
-        error: 'Video dosyası okunamadı veya bozuk olabilir.',
+        error: null, // Don't show error, let FFmpeg handle it
         isLoading: false,
       });
       cleanup();
