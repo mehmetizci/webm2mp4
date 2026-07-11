@@ -26,6 +26,7 @@ export interface ConversionProgress {
   percent: number;
   time: number;
   stage: ConversionStage;
+  hasProgress?: boolean; // Whether actual progress events have been received
 }
 
 export type ConversionStage =

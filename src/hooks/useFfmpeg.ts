@@ -15,6 +15,7 @@ import { getOutputFileName } from '@/lib/file-utils';
 const INPUT_FILE = 'input.webm';
 const ANALYZE_FILE = 'analyze.webm';
 const OUTPUT_FILE = 'output.mp4';
+const PROGRESS_TIMEOUT_MS = 30000; // 30 seconds timeout for progress events
 
 interface EncoderValidation {
   h264: boolean;
@@ -42,6 +43,7 @@ export function useFfmpeg(): UseFfmpegReturn {
   const encoderValidationRef = useRef<EncoderValidation | null>(null);
   const logHandlerRef = useRef<((data: { message: string }) => void) | null>(null);
   const progressHandlerRef = useRef<((data: { progress: number }) => void) | null>(null);
+  const progressTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   
   const [isLoaded, setIsLoaded] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -49,18 +51,28 @@ export function useFfmpeg(): UseFfmpegReturn {
     percent: 0,
     time: 0,
     stage: 'idle',
+    hasProgress: false, // Track if progress has started
   });
   const [error, setError] = useState<ConversionError | null>(null);
 
-  const startTimeRef = useRef<number>(0);
+  const startTimeRef = useRef<number>(Date.now()); // Initialize immediately
 
-  const updateProgress = useCallback((percent: number, stage: ConversionStage) => {
+  const clearProgressTimeout = useCallback(() => {
+    if (progressTimeoutRef.current) {
+      clearTimeout(progressTimeoutRef.current);
+      progressTimeoutRef.current = null;
+    }
+  }, []);
+
+  const updateProgress = useCallback((percent: number, stage: ConversionStage, hasProgress = true) => {
     const elapsed = (Date.now() - startTimeRef.current) / 1000;
     setProgress({
       percent: Math.min(Math.max(percent, 0), 100),
       time: elapsed,
       stage,
+      hasProgress,
     });
+    console.log('[Progress] Stage:', stage, '| Percent:', percent, '| Time:', elapsed.toFixed(1) + 's');
   }, []);
 
   const cleanupFFmpegFiles = useCallback(async (ffmpeg: FFmpeg, fileName: string) => {
@@ -224,25 +236,34 @@ export function useFfmpeg(): UseFfmpegReturn {
 
     setIsLoading(true);
     setError(null);
-    updateProgress(0, 'loading');
+    updateProgress(0, 'loading', false);
+
+    const loadTimeout = setTimeout(() => {
+      console.log('[FFmpeg] Load timeout - showing loading message');
+    }, 10000);
 
     try {
       const ffmpeg = new FFmpeg();
+      console.log('[FFmpeg] FFmpeg load started');
 
       ffmpeg.on('log', ({ message }) => {
-        if (process.env.NODE_ENV === 'development') {
-          console.log('[FFmpeg]', message);
-        }
+        console.log('[FFmpeg]', message);
       });
 
       await ffmpeg.load({
         coreURL: '/ffmpeg/ffmpeg-core.js',
         wasmURL: '/ffmpeg/ffmpeg-core.wasm',
       });
+      console.log('[FFmpeg] FFmpeg load completed');
+
+      // Check if core and wasm were actually loaded
+      console.log('[FFmpeg] Core URL:', '/ffmpeg/ffmpeg-core.js', '| WASM URL:', '/ffmpeg/ffmpeg-core.wasm');
 
       ffmpegRef.current = ffmpeg;
 
+      console.log('[FFmpeg] Checking encoders...');
       const validation = await checkEncoders(ffmpeg);
+      console.log('[FFmpeg] Encoder check completed - H.264:', validation.h264, '| AAC:', validation.aac);
       encoderValidationRef.current = validation;
 
       if (!validation.h264) {
@@ -250,20 +271,18 @@ export function useFfmpeg(): UseFfmpegReturn {
         throw new Error('H264_NOT_FOUND');
       }
 
-      if (process.env.NODE_ENV === 'development') {
-        console.log('[FFmpeg] H.264:', validation.h264, '| AAC:', validation.aac);
-      }
-
       setIsLoaded(true);
-      updateProgress(0, 'idle');
+      updateProgress(0, 'idle', false);
     } catch (err) {
-      console.error('FFmpeg load error:', err);
+      console.error('[FFmpeg] Load error:', err);
       const errorText = err instanceof Error ? err.message : String(err);
       
       let errorMessage = 'Dönüştürücü yüklenemedi.';
       
       if (errorText === 'H264_NOT_FOUND') {
         errorMessage = 'Bu tarayıcıda gerekli H.264 dönüştürücü yüklenemedi. Lütfen sayfayı yenileyerek tekrar deneyin.';
+      } else if (errorText.includes('fetch') || errorText.includes('network') || errorText.includes('Failed to')) {
+        errorMessage = 'FFmpeg dosyaları yüklenemedi. Lütfen internet bağlantınızı kontrol edin ve sayfayı yenileyin.';
       } else {
         errorMessage = 'Dönüştürücü yüklenemedi. Tarayıcınız WebAssembly desteklemiyor olabilir.';
       }
@@ -274,8 +293,9 @@ export function useFfmpeg(): UseFfmpegReturn {
         technical: errorText,
       };
       setError(errorObj);
-      updateProgress(0, 'error');
+      updateProgress(0, 'error', false);
     } finally {
+      clearTimeout(loadTimeout);
       setIsLoading(false);
     }
   }, [isLoading, updateProgress, checkEncoders]);
@@ -323,7 +343,9 @@ export function useFfmpeg(): UseFfmpegReturn {
       throw new Error('H264_NOT_FOUND');
     }
 
+    // Initialize start time and clear any previous timeout
     startTimeRef.current = Date.now();
+    clearProgressTimeout();
     setError(null);
 
     const crfMap: Record<QualityPreset, number> = {
@@ -333,15 +355,20 @@ export function useFfmpeg(): UseFfmpegReturn {
     };
     const crf = crfMap[quality];
 
+    // Flag to track if we've received first progress event
+    let hasReceivedProgress = false;
+
     try {
       onStageChange?.('reading');
-      updateProgress(0, 'reading');
+      updateProgress(0, 'reading', false);
 
+      console.log('[FFmpeg] ffmpeg.exec started - reading file');
+      
       fileDataRef.current = new Uint8Array(await file.arrayBuffer());
       await ffmpeg.writeFile(INPUT_FILE, fileDataRef.current);
       
       onStageChange?.('analyzing');
-      updateProgress(5, 'analyzing');
+      updateProgress(5, 'analyzing', false);
 
       const mediaInfo = await parseMediaInfo(ffmpeg, file, INPUT_FILE);
 
@@ -356,7 +383,7 @@ export function useFfmpeg(): UseFfmpegReturn {
       }
 
       onStageChange?.('converting');
-      updateProgress(10, 'converting');
+      updateProgress(10, 'converting', false);
 
       const ffmpegArgs = [
         '-i', INPUT_FILE,
@@ -379,29 +406,42 @@ export function useFfmpeg(): UseFfmpegReturn {
 
       ffmpegArgs.push(OUTPUT_FILE);
 
-      if (process.env.NODE_ENV === 'development') {
-        console.log('[FFmpeg] Command:', ffmpegArgs.join(' '));
-        console.log('[FFmpeg] Has audio:', mediaInfo.hasAudio);
-      }
+      console.log('[FFmpeg] Command:', ffmpegArgs.join(' '));
+      console.log('[FFmpeg] Has audio:', mediaInfo.hasAudio);
+      console.log('[FFmpeg] ffmpeg.exec starting with args...');
 
+      // Set up progress handler
       progressHandlerRef.current = ({ progress: p }) => {
+        if (!hasReceivedProgress) {
+          hasReceivedProgress = true;
+          clearProgressTimeout();
+          console.log('[FFmpeg] First progress event received');
+        }
         const percent = 10 + Math.round(p * 85);
-        updateProgress(percent, 'converting');
+        updateProgress(percent, 'converting', true);
       };
       ffmpeg.on('progress', progressHandlerRef.current);
 
+      // Set up progress timeout (30 seconds)
+      progressTimeoutRef.current = setTimeout(() => {
+        console.error('[FFmpeg] Progress timeout - no progress event received in 30 seconds');
+        // Don't terminate here, let the exec continue and fail naturally
+      }, PROGRESS_TIMEOUT_MS);
+
       await ffmpeg.exec(ffmpegArgs as string[]);
+      console.log('[FFmpeg] ffmpeg.exec completed successfully');
       
+      clearProgressTimeout();
       ffmpeg.off('progress', progressHandlerRef.current);
       progressHandlerRef.current = null;
 
       onStageChange?.('finalizing');
-      updateProgress(95, 'finalizing');
+      updateProgress(95, 'finalizing', true);
       
       const outputData = await ffmpeg.readFile(OUTPUT_FILE);
 
       onStageChange?.('complete');
-      updateProgress(100, 'complete');
+      updateProgress(100, 'complete', true);
 
       let uint8Output: Uint8Array;
       if (outputData instanceof Uint8Array) {
@@ -415,6 +455,8 @@ export function useFfmpeg(): UseFfmpegReturn {
       
       const blob = new Blob([uint8Output.buffer as ArrayBuffer], { type: 'video/mp4' });
       const duration = (Date.now() - startTimeRef.current) / 1000;
+      
+      console.log('[FFmpeg] Conversion completed in', duration.toFixed(1), 'seconds');
 
       return {
         blob,
@@ -423,7 +465,9 @@ export function useFfmpeg(): UseFfmpegReturn {
         duration,
       };
     } catch (err) {
-      console.error('Conversion error:', err);
+      console.error('[FFmpeg] Conversion error:', err);
+      
+      clearProgressTimeout();
       
       const errorText = err instanceof Error ? err.message : String(err);
       
@@ -439,6 +483,10 @@ export function useFfmpeg(): UseFfmpegReturn {
       } else if (errorText.includes('memory') || errorText.includes('Memory')) {
         errorMessage = 'Cihaz belleği yetersiz. Lütfen daha küçük bir dosya deneyin.';
         errorCode = 'MEMORY_ERROR';
+      } else if (!hasReceivedProgress) {
+        // If we never received any progress, it might be a timeout or FFmpeg crash
+        errorMessage = 'Video dönüştürme başlatılamadı. Bu genellikle cihaz belleğinin yetersiz olduğu anlamına gelir.';
+        errorCode = 'PROGRESS_TIMEOUT';
       }
 
       const errorObj: ConversionError = {
@@ -451,6 +499,7 @@ export function useFfmpeg(): UseFfmpegReturn {
       onStageChange?.('error');
       throw err;
     } finally {
+      clearProgressTimeout();
       if (progressHandlerRef.current && ffmpeg) {
         ffmpeg.off('progress', progressHandlerRef.current);
         progressHandlerRef.current = null;
@@ -462,9 +511,10 @@ export function useFfmpeg(): UseFfmpegReturn {
         fileDataRef.current = null;
       }
     }
-  }, [cleanupAllFiles, parseMediaInfo, updateProgress]);
+  }, [cleanupAllFiles, parseMediaInfo, updateProgress, clearProgressTimeout]);
 
   const terminate = useCallback(() => {
+    clearProgressTimeout();
     if (ffmpegRef.current) {
       if (logHandlerRef.current) {
         ffmpegRef.current.off('log', logHandlerRef.current);
@@ -483,9 +533,9 @@ export function useFfmpeg(): UseFfmpegReturn {
     if (fileDataRef.current) {
       fileDataRef.current = null;
     }
-    setProgress({ percent: 0, time: 0, stage: 'idle' });
+    setProgress({ percent: 0, time: 0, stage: 'idle', hasProgress: false });
     setError(null);
-  }, []);
+  }, [clearProgressTimeout]);
 
   return {
     isLoaded,

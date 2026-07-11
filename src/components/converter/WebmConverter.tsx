@@ -50,6 +50,7 @@ export function WebmConverter() {
   const [result, setResult] = useState<ResultType | null>(null);
   const [conversionError, setConversionError] = useState<ErrorType | null>(null);
   const [stage, setStage] = useState<ConversionStage>('idle');
+  const [showLongLoading, setShowLongLoading] = useState(false);
 
   const { 
     isLoaded: ffmpegLoaded, 
@@ -66,6 +67,18 @@ export function WebmConverter() {
   const browserCheck = typeof window !== 'undefined' 
     ? checkBrowserSupport() 
     : { supported: true };
+
+  // Show long loading message after 10 seconds of FFmpeg loading
+  useEffect(() => {
+    if (ffmpegLoading && stage === 'loading') {
+      const timer = setTimeout(() => {
+        setShowLongLoading(true);
+      }, 10000);
+      return () => clearTimeout(timer);
+    } else {
+      setShowLongLoading(false);
+    }
+  }, [ffmpegLoading, stage]);
 
   // Analyze media when file is selected and FFmpeg is loaded
   useEffect(() => {
@@ -108,7 +121,7 @@ export function WebmConverter() {
       }
 
       if (!ffmpegLoaded) {
-        throw new Error('FFmpeg yüklenemedi');
+        throw new Error('FFmpeg y체klenemedi');
       }
 
       const convertResult = await convert(selectedFile, settings.quality, setStage);
@@ -151,10 +164,10 @@ export function WebmConverter() {
           <div className="w-16 h-16 mx-auto rounded-full bg-red-100 flex items-center justify-center">
             <AlertTriangle className="w-8 h-8 text-red-500" />
           </div>
-          <h2 className="text-xl font-semibold text-red-800">Tarayıcı Desteklenmiyor</h2>
+          <h2 className="text-xl font-semibold text-red-800">Taray캇c캇 Desteklenmiyor</h2>
           <p className="text-red-600">{browserCheck.message}</p>
           <p className="text-sm text-red-500">
-            Lütfen Chrome, Firefox, Edge veya Safari&apos;nin güncel bir sürümünü kullanın.
+            L체tfen Chrome, Firefox, Edge veya Safari&apos;nin g체ncel bir s체r체m체n체 kullan캇n.
           </p>
         </div>
       </div>
@@ -172,14 +185,14 @@ export function WebmConverter() {
     <div className="w-full max-w-[720px] mx-auto px-4 py-8 space-y-6">
       <div className="text-center space-y-3">
         <h1 className="text-2xl sm:text-3xl font-semibold text-[#1F2937]">
-          WebM Dosyanızı MP4&apos;e Dönüştürün
+          WebM Dosyan캇z캇 MP4&apos;e D철n체힊t체r체n
         </h1>
         <p className="text-[#6B7280] text-sm sm:text-base max-w-md mx-auto">
-          WebM videonuzu yükleyin, tarayıcınızda güvenli bir şekilde MP4 formatına dönüştürün ve hemen indirin.
+          WebM videonuzu y체kleyin, taray캇c캇n캇zda g체venli bir 힊ekilde MP4 format캇na d철n체힊t체r체n ve hemen indirin.
         </p>
         <div className="flex items-center justify-center gap-2 text-xs text-[#6B7280]">
           <ShieldCheck className="w-4 h-4 text-[#10B981]" />
-          <span>Dosyanız cihazınızdan ayrılmaz. Dönüşüm tamamen tarayıcınızda gerçekleştirilir.</span>
+          <span>Dosyan캇z cihaz캇n캇zdan ayr캇lmaz. D철n체힊체m tamamen taray캇c캇n캇zda ger챌ekle힊tirilir.</span>
         </div>
       </div>
 
@@ -199,7 +212,7 @@ export function WebmConverter() {
 
             {/* Output format info */}
             <div className="bg-[#F3F4F6] rounded-[10px] p-3 text-xs space-y-1">
-              <p className="font-medium text-[#374151]">Çıktı Formatı: MP4</p>
+              <p className="font-medium text-[#374151]">횉캇kt캇 Format캇: MP4</p>
               <p className="text-[#6B7280]">
                 Video: H.264 | Ses: AAC
               </p>
@@ -218,7 +231,7 @@ export function WebmConverter() {
               {ffmpegLoading || isAnalyzing ? (
                 <>
                   <Loader2 className="w-4 h-4 animate-spin" />
-                  {isAnalyzing ? 'Video analiz ediliyor...' : 'Dönüştürücü hazırlanıyor...'}
+                  {isAnalyzing ? 'Video analiz ediliyor...' : showLongLoading ? 'Dönüştürücü yükleniyor...' : 'Dönüştürücü hazırlanıyor...'}
                 </>
               ) : (
                 <>
@@ -249,7 +262,7 @@ export function WebmConverter() {
               onClick={handleRemoveFile}
               className="mt-2 text-sm text-red-500 hover:text-red-700 underline"
             >
-              Farklı bir dosya seçin
+              Farkl캇 bir dosya se챌in
             </button>
           </div>
         )}
@@ -258,13 +271,13 @@ export function WebmConverter() {
       <div className="bg-[#F9FAFB] rounded-[10px] p-4 space-y-3">
         <h3 className="text-sm font-medium text-[#374151] flex items-center gap-2">
           <ShieldCheck className="w-4 h-4 text-[#10B981]" />
-          Videonuz güvende
+          Videonuz g체vende
         </h3>
         <p className="text-xs text-[#6B7280]">
-          Seçtiğiniz video herhangi bir sunucuya yüklenmez. Tüm dönüştürme işlemi cihazınızın tarayıcısında gerçekleştirilir ve işlem tamamlandığında geçici veriler temizlenir.
+          Se챌ti휓iniz video herhangi bir sunucuya y체klenmez. T체m d철n체힊t체rme i힊lemi cihaz캇n캇z캇n taray캇c캇s캇nda ger챌ekle힊tirilir ve i힊lem tamamland캇휓캇nda ge챌ici veriler temizlenir.
         </p>
         <ul className="space-y-1">
-          {['Sunucuya dosya yüklenmez', 'Video saklanmaz', 'Üyelik gerekmez'].map((item) => (
+          {['Sunucuya dosya y체klenmez', 'Video saklanmaz', '횥yelik gerekmez'].map((item) => (
             <li key={item} className="flex items-center gap-2 text-xs text-[#6B7280]">
               <span className="w-1.5 h-1.5 rounded-full bg-[#10B981]" />
               {item}

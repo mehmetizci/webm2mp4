@@ -17,6 +17,10 @@ const STAGE_DESCRIPTIONS: Record<string, string> = {
 };
 
 export function ConversionProgress({ progress }: ConversionProgressProps) {
+  // If no actual progress has been received, show preparing message
+  const showPreparing = !progress.hasProgress && progress.stage !== 'loading' && progress.stage !== 'complete' && progress.stage !== 'error';
+  const showTimeEstimate = progress.hasProgress || progress.time > 2; // Show time after 2 seconds even without progress
+
   return (
     <div className="flex flex-col items-center justify-center w-full min-h-[280px] sm:min-h-[320px] bg-[#F9FAFB] rounded-[10px] p-6 space-y-6">
       <div className="relative">
@@ -50,12 +54,16 @@ export function ConversionProgress({ progress }: ConversionProgressProps) {
 
       <div className="text-center space-y-2">
         <p className="text-[#1F2937] font-medium text-base">
-          Videonuz MP4 formatına dönüştürülüyor
+          {showPreparing ? 'Hazırlanıyor...' : 'Videonuz MP4 formatına dönüştürülüyor'}
         </p>
         <p className="text-[#6B7280] text-sm">
-          {STAGE_LABELS[progress.stage] || 'İşleniyor...'}
+          {showPreparing ? 'Lütfen bekleyin...' : (STAGE_LABELS[progress.stage] || 'İşleniyor...')}
         </p>
-        {STAGE_DESCRIPTIONS[progress.stage] && (
+        {showPreparing ? (
+          <p className="text-[#9CA3AF] text-xs">
+            Dönüştürme başlatılıyor...
+          </p>
+        ) : STAGE_DESCRIPTIONS[progress.stage] && (
           <p className="text-[#9CA3AF] text-xs">
             {STAGE_DESCRIPTIONS[progress.stage]}
           </p>
@@ -65,7 +73,9 @@ export function ConversionProgress({ progress }: ConversionProgressProps) {
       <div className="w-full max-w-xs space-y-3">
         <div className="flex justify-between text-sm">
           <span className="text-[#374151] font-medium">{progress.percent.toFixed(0)}%</span>
-          <span className="text-[#6B7280]">{formatTime(progress.time)}</span>
+          <span className="text-[#6B7280]">
+            {showTimeEstimate ? formatTime(progress.time) : '--'}
+          </span>
         </div>
         
         <div className="w-full h-2 bg-[#E5E7EB] rounded-full overflow-hidden">
