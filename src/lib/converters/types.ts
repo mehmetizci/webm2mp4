@@ -93,6 +93,9 @@ export interface OutputAnalysis {
   averageAudioBitrate: number | null;
   container: string;
   fileSizeBytes: number;
+  // Target values for comparison
+  targetBitrate?: number;
+  bitrateDifference?: number;
 }
 
 export interface ConverterSupport {

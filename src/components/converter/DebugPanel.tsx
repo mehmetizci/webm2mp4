@@ -369,8 +369,23 @@ export function DebugPanel({ debugInfo, isVisible, webCodecsDetection, selectedE
           {actualEngine === 'webcodecs' && debugInfo.webCodecsEncoderConfig && (
             <DebugSection title="Encoder Ayarları">
               <DebugRow 
+                label="Kalite" 
+                value={debugInfo.webCodecsQualityPreset?.toUpperCase() || 'STANDART'} 
+                status="completed"
+              />
+              <DebugRow 
                 label="Codec" 
                 value={debugInfo.webCodecsEncoderConfig.codec?.toUpperCase() || 'H.264'} 
+              />
+              <DebugRow 
+                label="Çözünürlük" 
+                value={debugInfo.webCodecsOutputWidth && debugInfo.webCodecsOutputHeight 
+                  ? `${debugInfo.webCodecsOutputWidth}x${debugInfo.webCodecsOutputHeight}` 
+                  : '-'} 
+              />
+              <DebugRow 
+                label="FPS" 
+                value={debugInfo.webCodecsEncoderConfig.framerate?.toString() || '30'} 
               />
               <DebugRow 
                 label="Hedef Bitrate" 
@@ -385,19 +400,20 @@ export function DebugPanel({ debugInfo, isVisible, webCodecsDetection, selectedE
                   status="completed"
                 />
               )}
-              {debugInfo.webCodecsOutputWidth && debugInfo.webCodecsOutputHeight && (
+              {debugInfo.webCodecsBitrateDifference !== null && (
                 <DebugRow 
-                  label="Çözünürlük" 
-                  value={`${debugInfo.webCodecsOutputWidth}x${debugInfo.webCodecsOutputHeight}`} 
+                  label="Fark %" 
+                  value={`${debugInfo.webCodecsBitrateDifference > 0 ? '+' : ''}${debugInfo.webCodecsBitrateDifference.toFixed(1)}%`}
+                  status={Math.abs(debugInfo.webCodecsBitrateDifference) <= 15 ? 'completed' : 'warning'}
                 />
               )}
               <DebugRow 
-                label="FPS" 
-                value={debugInfo.webCodecsEncoderConfig.framerate?.toString() || '30'} 
-              />
-              <DebugRow 
                 label="Bitrate Mode" 
                 value={debugInfo.webCodecsEncoderConfig.bitrateMode?.toUpperCase() || 'VBR'} 
+              />
+              <DebugRow 
+                label="Latency Mode" 
+                value={debugInfo.webCodecsEncoderConfig.latencyMode?.toUpperCase() || 'QUALITY'} 
               />
               <DebugRow 
                 label="Hardware" 

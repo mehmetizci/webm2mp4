@@ -80,8 +80,10 @@ export interface ConversionDebugInfo {
     keyFrameInterval: number;
   } | null;
   webCodecsActualBitrate: number | null;
+  webCodecsBitrateDifference: number | null;
   webCodecsOutputWidth: number | null;
   webCodecsOutputHeight: number | null;
+  webCodecsQualityPreset: string | null;
   // Cleanup status
   cleanupStatus: 'idle' | 'cleaning' | 'completed' | 'warning' | 'error';
   cleanupValidation: {
@@ -321,8 +323,10 @@ const initialDebugInfo: ConversionDebugInfo = {
   // WebCodecs encoder config
   webCodecsEncoderConfig: null,
   webCodecsActualBitrate: null,
+  webCodecsBitrateDifference: null,
   webCodecsOutputWidth: null,
   webCodecsOutputHeight: null,
+  webCodecsQualityPreset: null,
   // Cleanup status
   cleanupStatus: 'idle',
   cleanupValidation: null,

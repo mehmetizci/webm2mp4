@@ -56,6 +56,8 @@ export interface WebCodecsDebugInfo {
   outputHeight: number;
   targetBitrate: number;
   actualBitrate: number | null;
+  bitrateDifference: number;
+  qualityPreset: string;
   hardwareAcceleration: string;
   encodedVideoFrames: number;
   encodedAudioSamples: number;
@@ -95,6 +97,8 @@ export class WebCodecsConverter implements VideoConverter {
     outputHeight: 0,
     targetBitrate: 0,
     actualBitrate: null,
+    bitrateDifference: 0,
+    qualityPreset: 'standard',
     hardwareAcceleration: 'prefer-hardware',
     encodedVideoFrames: 0,
     encodedAudioSamples: 0,
@@ -199,12 +203,24 @@ export class WebCodecsConverter implements VideoConverter {
         quality as QualityPreset
       );
       
-      console.log('[WebCodecs] Encoder config:', {
-        quality,
-        input: `${videoWidth}x${videoHeight}`,
-        output: `${outputWidth}x${outputHeight}`,
-        ...encoderConfig,
-      });
+      // Enhanced encoder config logging for verification
+      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      console.log('[WebCodecs] ENCODER CONFIGURATION');
+      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      console.log(`Quality Preset: ${quality}`);
+      console.log(`Input Resolution: ${videoWidth}x${videoHeight}`);
+      console.log(`Output Resolution: ${outputWidth}x${outputHeight}`);
+      console.log('────────────────────────────────────────');
+      console.log(`Codec: ${encoderConfig.encoder.codec.toUpperCase()}`);
+      console.log(`Target Bitrate: ${(encoderConfig.encoder.bitrate / 1000).toFixed(0)} kbps`);
+      console.log(`Frame Rate: ${encoderConfig.encoder.framerate} fps`);
+      console.log(`Bitrate Mode: ${encoderConfig.encoder.bitrateMode.toUpperCase()}`);
+      console.log(`Latency Mode: ${encoderConfig.encoder.latencyMode}`);
+      console.log(`Hardware Acceleration: ${encoderConfig.encoder.hardwareAcceleration}`);
+      console.log(`Key Frame Interval: ${encoderConfig.encoder.keyFrameInterval}s`);
+      console.log(`Total Video Bitrate: ${(encoderConfig.videoBitrate / 1000).toFixed(0)} kbps`);
+      console.log(`Audio Bitrate: ${(encoderConfig.audioBitrate / 1000).toFixed(0)} kbps`);
+      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
       
       // Update debug info with encoder configuration
       this.debugInfo.inputWidth = videoWidth;
@@ -213,6 +229,7 @@ export class WebCodecsConverter implements VideoConverter {
       this.debugInfo.outputHeight = outputHeight;
       this.debugInfo.targetBitrate = encoderConfig.videoBitrate;
       this.debugInfo.hardwareAcceleration = encoderConfig.encoder.hardwareAcceleration;
+      this.debugInfo.qualityPreset = quality;
       this.debugInfo.encoderConfig = {
         codec: encoderConfig.encoder.codec,
         bitrate: encoderConfig.encoder.bitrate,
@@ -336,7 +353,12 @@ export class WebCodecsConverter implements VideoConverter {
         
         if (videoTrack) {
           const trackInfo = await videoTrack.getTrackInfo();
-          const videoBitrate = trackInfo.bitrate ?? this.debugInfo.targetBitrate;
+          const actualVideoBitrate = trackInfo.bitrate ?? this.debugInfo.targetBitrate;
+          
+          // Calculate bitrate difference percentage
+          const bitrateDifference = this.debugInfo.targetBitrate > 0
+            ? ((actualVideoBitrate - this.debugInfo.targetBitrate) / this.debugInfo.targetBitrate * 100)
+            : 0;
           
           outputAnalysis = {
             videoCodec: trackInfo.codec ?? 'H.264',
@@ -345,16 +367,41 @@ export class WebCodecsConverter implements VideoConverter {
             height: trackInfo.height ?? this.debugInfo.outputHeight,
             frameRate: trackInfo.frameRate ?? frameRate,
             duration: this.inputDuration,
-            averageVideoBitrate: videoBitrate,
+            averageVideoBitrate: actualVideoBitrate,
             averageAudioBitrate: audioTrack ? 128_000 : null,
             container: 'MP4',
             fileSizeBytes: outputBuffer.byteLength,
+            targetBitrate: this.debugInfo.targetBitrate,
+            bitrateDifference: bitrateDifference,
           };
           
           // Update debug info with actual bitrate
-          this.debugInfo.actualBitrate = videoBitrate;
+          this.debugInfo.actualBitrate = actualVideoBitrate;
+          this.debugInfo.bitrateDifference = bitrateDifference;
           
-          console.log('[WebCodecs] Output analysis:', outputAnalysis);
+          // Enhanced output analysis logging
+          console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+          console.log('[WebCodecs] OUTPUT ANALYSIS');
+          console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+          console.log(`Video Codec: ${outputAnalysis.videoCodec}`);
+          console.log(`Audio Codec: ${outputAnalysis.audioCodec ?? 'None'}`);
+          console.log(`Resolution: ${outputAnalysis.width}x${outputAnalysis.height}`);
+          console.log(`Frame Rate: ${outputAnalysis.frameRate} fps`);
+          console.log(`Duration: ${outputAnalysis.duration.toFixed(1)}s`);
+          console.log(`File Size: ${(outputAnalysis.fileSizeBytes / 1024 / 1024).toFixed(2)} MB`);
+          console.log('────────────────────────────────────────');
+          console.log(`Target Video Bitrate: ${(this.debugInfo.targetBitrate / 1000).toFixed(0)} kbps`);
+          console.log(`Actual Video Bitrate: ${(actualVideoBitrate / 1000).toFixed(0)} kbps`);
+          console.log(`Bitrate Difference: ${bitrateDifference > 0 ? '+' : ''}${bitrateDifference.toFixed(1)}%`);
+          console.log(`Audio Bitrate: ${outputAnalysis.averageAudioBitrate ? (outputAnalysis.averageAudioBitrate / 1000).toFixed(0) : 0} kbps`);
+          console.log('Container: MP4');
+          
+          if (Math.abs(bitrateDifference) > 15) {
+            console.warn(`⚠️ Bitrate difference is > 15%! Expected ~${(this.debugInfo.targetBitrate / 1000).toFixed(0)} kbps, got ${(actualVideoBitrate / 1000).toFixed(0)} kbps`);
+          } else {
+            console.log('✅ Bitrate is within acceptable range (< 15% difference)');
+          }
+          console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
         }
       } catch (analysisError) {
         console.warn('[WebCodecs] Could not analyze output:', analysisError);
@@ -442,6 +489,8 @@ export class WebCodecsConverter implements VideoConverter {
       outputHeight: 0,
       targetBitrate: 0,
       actualBitrate: null,
+      bitrateDifference: 0,
+      qualityPreset: 'standard',
       hardwareAcceleration: 'prefer-hardware',
       encodedVideoFrames: 0,
       encodedAudioSamples: 0,

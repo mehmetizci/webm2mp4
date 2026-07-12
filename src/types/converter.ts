@@ -82,22 +82,22 @@ export interface ConversionError {
 
 export const QUALITY_PRESETS: Record<QualityPreset, { crf: number; maxrate: number; label: string; description: string }> = {
   small: { 
-    crf: 32, 
-    maxrate: 500, 
+    crf: 30, 
+    maxrate: 600, 
     label: 'Küçük Dosya', 
-    description: 'En küçük dosya boyutu - ~500 kbps' 
+    description: 'En küçük dosya boyutu - ~600 kbps, harita yazıları okunabilir' 
   },
   standard: { 
     crf: 26, 
-    maxrate: 1200, 
+    maxrate: 1000, 
     label: 'Standart', 
-    description: 'Dengeli kalite ve dosya boyutu - ~1.2 Mbps' 
+    description: 'Dengeli kalite ve dosya boyutu - ~1 Mbps' 
   },
   high: { 
     crf: 20, 
-    maxrate: 2000, 
+    maxrate: 1800, 
     label: 'Yüksek Kalite', 
-    description: 'En iyi kalite - ~2 Mbps' 
+    description: 'En iyi kalite - ~1.8 Mbps' 
   },
 };
 

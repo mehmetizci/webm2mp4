@@ -20,25 +20,26 @@ export interface QualityConfig {
 }
 
 // Resolution-based bitrate tiers (in bits per second)
+// These values are optimized for map/text readability while minimizing file size
 const BITRATE_TIERS = {
   // For vertical videos (width < height) - common mobile aspect ratios
   vertical: {
     // 720p vertical (720x1280)
     720: {
-      small: 400_000,    // 400 kbps
+      small: 600_000,    // 600 kbps - minimum for map text readability
       standard: 1_000_000, // 1 Mbps
       high: 1_800_000,  // 1.8 Mbps
     },
     // 1080p vertical (1080x1920)
     1080: {
-      small: 800_000,    // 800 kbps
-      standard: 1_500_000, // 1.5 Mbps
-      high: 2_500_000,  // 2.5 Mbps
+      small: 1_000_000,    // 1 Mbps
+      standard: 2_000_000, // 2 Mbps
+      high: 3_500_000,  // 3.5 Mbps
     },
     // 480p vertical (480x854)
     480: {
-      small: 250_000,    // 250 kbps
-      standard: 500_000, // 500 kbps
+      small: 400_000,    // 400 kbps
+      standard: 600_000, // 600 kbps
       high: 800_000,    // 800 kbps
     },
   },
@@ -46,7 +47,7 @@ const BITRATE_TIERS = {
   horizontal: {
     // 720p horizontal (1280x720)
     720: {
-      small: 500_000,    // 500 kbps
+      small: 600_000,    // 600 kbps
       standard: 1_200_000, // 1.2 Mbps
       high: 2_000_000,  // 2 Mbps
     },
@@ -58,7 +59,7 @@ const BITRATE_TIERS = {
     },
     // 480p horizontal (854x480)
     480: {
-      small: 300_000,    // 300 kbps
+      small: 400_000,    // 400 kbps
       standard: 600_000, // 600 kbps
       high: 1_000_000,  // 1 Mbps
     },

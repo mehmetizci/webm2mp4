@@ -642,8 +642,10 @@ export function WebmConverter() {
             webCodecsActualBitrate: result.outputAnalysis?.averageVideoBitrate 
               ? result.outputAnalysis.averageVideoBitrate 
               : (actualVideoBitrate !== null ? actualVideoBitrate * 1000 : null),
+            webCodecsBitrateDifference: result.outputAnalysis?.bitrateDifference ?? null,
             webCodecsOutputWidth: encoderDebugInfo.outputWidth || null,
             webCodecsOutputHeight: encoderDebugInfo.outputHeight || null,
+            webCodecsQualityPreset: encoderDebugInfo.qualityPreset || 'standard',
             videoBitrate: actualVideoBitrate !== null ? actualVideoBitrate * 1000 : null,
             audioBitrate: audioBitrate * 1000,
             totalBitrate: totalBitrate !== null ? totalBitrate * 1000 : null,
