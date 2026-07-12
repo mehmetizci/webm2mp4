@@ -223,7 +223,7 @@ export class LowLevelWebCodecsConverter implements VideoConverter {
         webCodecsCodec = 'vp8';
         break;
       case 'vp9':
-        webCodecsCodec = 'vp09.00.10.08'; // VP9 profile 0
+        webCodecsCodec = 'vp09'; // Generic VP9 (no profile/level info from file)
         break;
       case 'av1':
         webCodecsCodec = 'av01'; // AV1

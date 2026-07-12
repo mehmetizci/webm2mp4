@@ -234,12 +234,12 @@ export function DebugPanel({ debugInfo, isVisible, webCodecsDetection, selectedE
           <DebugSection title="Giriş Decoder Desteği">
             {/* Input video codec info from Mediabunny */}
             <DebugRow 
-              label="Giriş Video Codec" 
+              label="Container Codec" 
               value={debugInfo.inputVideoCodec || '-'} 
               status={debugInfo.inputVideoCodec ? 'completed' : 'idle'}
             />
             <DebugRow 
-              label="Codec String" 
+              label="WebCodecs Codec String" 
               value={debugInfo.inputVideoCodecString || '-'} 
               status={debugInfo.inputVideoCodecString ? 'completed' : 'idle'}
             />
@@ -248,15 +248,20 @@ export function DebugPanel({ debugInfo, isVisible, webCodecsDetection, selectedE
               value={debugInfo.inputAudioCodec || 'Yok'} 
               status={debugInfo.inputAudioCodec ? 'completed' : 'idle'}
             />
-            {/* Decoder support status */}
-            {debugInfo.inputDecoderStatus && (
+            {/* Decoder API availability */}
+            <DebugRow 
+              label="Decoder API" 
+              value={detection?.capabilities?.videoDecoder ? 'Mevcut' : 'Yok'} 
+              status={detection?.capabilities?.videoDecoder ? 'completed' : 'error'}
+            />
+            {/* Decoder support status - only show if actually tested */}
+            {debugInfo.inputDecoderStatus && debugInfo.inputDecoderStatus !== 'untested' && (
               <DebugRow 
-                label="Decoder Destek" 
+                label="Decoder Test Sonucu" 
                 value={
                   debugInfo.inputDecoderStatus === 'supported' ? 'Destekleniyor' :
                   debugInfo.inputDecoderStatus === 'unsupported' ? 'Desteklenmiyor' :
-                  debugInfo.inputDecoderStatus === 'error' ? 'Test Hatası' :
-                  debugInfo.inputDecoderStatus === 'untested' ? 'Test Edilmedi' : '-'
+                  debugInfo.inputDecoderStatus === 'error' ? 'Test Hatası' : '-'
                 }
                 status={
                   debugInfo.inputDecoderStatus === 'supported' ? 'completed' :
@@ -265,10 +270,11 @@ export function DebugPanel({ debugInfo, isVisible, webCodecsDetection, selectedE
                 }
               />
             )}
+            {/* Demuxer - Mediabunny is the demuxer/pipeline */}
             <DebugRow 
-              label="Kullanılan Decoder" 
-              value={debugInfo.actualDecoderUsed || 'Mediabunny'} 
-              status={debugInfo.actualDecoderUsed ? 'completed' : 'idle'}
+              label="Demuxer" 
+              value="Mediabunny" 
+              status="completed"
             />
           </DebugSection>
 
@@ -443,8 +449,8 @@ export function DebugPanel({ debugInfo, isVisible, webCodecsDetection, selectedE
                 />
               )}
               <DebugRow 
-                label="Hardware Accel." 
-                value={debugInfo.webCodecsEncoderConfig.hardwareAcceleration || debugInfo.webCodecsHardwareMode || 'no-preference'} 
+                label="Hardware Mode (Tercih)" 
+                value={debugInfo.webCodecsHardwareMode || 'no-preference'} 
               />
             </DebugSection>
           )}
