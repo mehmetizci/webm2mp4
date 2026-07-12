@@ -236,7 +236,7 @@ export function DebugPanel({ debugInfo, isVisible, webCodecsDetection, selectedE
                 />
                 {detection.capabilities.hardwareAcceleration && (
                   <DebugRow 
-                    label="Hardware Acceleration" 
+                    label="Tarayıcı Tercihi" 
                     value={detection.capabilities.hardwareAcceleration} 
                   />
                 )}
@@ -318,10 +318,10 @@ export function DebugPanel({ debugInfo, isVisible, webCodecsDetection, selectedE
                   </>
                 )}
                 
-                {/* Selected H.264 profile */}
+                {/* Selected H.264 profile - from encoder config runtime values */}
                 <DebugRow 
                   label="Seçilen Profil" 
-                  value={debugInfo.webCodecsTestedCodec || '-'} 
+                  value={debugInfo.webCodecsEncoderConfig?.codecProfile || debugInfo.webCodecsTestedCodec || '-'} 
                   status={debugInfo.webCodecsH264Supported ? 'completed' : 'idle'}
                 />
               </>
@@ -477,7 +477,7 @@ export function DebugPanel({ debugInfo, isVisible, webCodecsDetection, selectedE
                 />
               )}
               <DebugRow 
-                label="Hardware Mode (Tercih)" 
+                label="Encoder Tercih" 
                 value={debugInfo.webCodecsHardwareMode || 'no-preference'} 
               />
             </DebugSection>
