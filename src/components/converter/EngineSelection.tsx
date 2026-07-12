@@ -11,8 +11,8 @@ interface EngineSelectionProps {
   onRetryDetection?: () => void;
 }
 
-// WebCodecs converter is not yet implemented
-const WEBCODECS_NOT_IMPLEMENTED = true;
+// WebCodecs converter is implemented using MediaRecorder + VideoEncoder
+const WEBCODECS_NOT_IMPLEMENTED = false;
 
 export function EngineSelection({
   selectedEngine,
@@ -50,12 +50,11 @@ export function EngineSelection({
     
     switch (status) {
       case 'idle':
-        return <span className="text-slate-400 text-xs">Bekleniyor...</span>;
       case 'checking':
         return (
           <div className="flex items-center gap-2 text-slate-500 text-xs">
             <Loader2 className="w-3 h-3 animate-spin" />
-            Test ediliyor...
+            {status === 'checking' ? 'Test ediliyor...' : 'Bekleniyor...'}
           </div>
         );
       case 'completed':

@@ -6,8 +6,8 @@ import type {
   ConvertOptions,
   ConversionResult,
   ConverterSupport,
-  ConversionProgress,
 } from './types';
+import type { ConversionStage } from '@/types/converter';
 import { checkFFmpegSupport } from './webCodecsSupport';
 import { FFmpeg } from '@ffmpeg/ffmpeg';
 import { fetchFile, toBlobURL } from '@ffmpeg/util';
@@ -86,15 +86,15 @@ export class FFmpegConverter implements VideoConverter {
     } = options;
 
     // Report initial progress
-    const reportProgress = (stage: ConversionProgress['stage'], percent: number | null = null, encodedSeconds = 0) => {
+    const reportProgress = (stage: ConversionStage, percent: number | null = null, encodedSeconds = 0) => {
       if (onProgress) {
         onProgress({
-          percent,
-          encodedSeconds,
-          totalSeconds: null,
-          encodingSpeed: null,
-          estimatedRemainingSeconds: null,
+          percent: percent ?? 0,
+          time: encodedSeconds,
           stage,
+          hasProgress: percent !== null,
+          encodedTime: encodedSeconds,
+          totalDuration: null,
         });
       }
     };
@@ -104,7 +104,7 @@ export class FFmpegConverter implements VideoConverter {
       throw new Error('Conversion aborted');
     }
 
-    reportProgress('preparing');
+    reportProgress('reading');
 
     // Load FFmpeg if not loaded
     if (!state.loaded) {
@@ -119,7 +119,7 @@ export class FFmpegConverter implements VideoConverter {
       throw new Error('FFmpeg not initialized');
     }
 
-    reportProgress('demuxing');
+    reportProgress('analyzing');
 
     // Write input file
     const inputData = await fetchFile(file);
@@ -167,12 +167,12 @@ export class FFmpegConverter implements VideoConverter {
             : null;
 
           onProgress({
-            percent,
-            encodedSeconds: time / 1_000_000, // FFmpeg time is in microseconds
-            totalSeconds: totalDuration > 0 ? totalDuration / 1_000_000 : null,
-            encodingSpeed: null,
-            estimatedRemainingSeconds: null,
-            stage: 'encoding',
+            percent: percent ?? 0,
+            time: time / 1_000_000, // FFmpeg time is in microseconds
+            stage: 'converting',
+            hasProgress: percent !== null,
+            encodedTime: time / 1_000_000,
+            totalDuration: totalDuration > 0 ? totalDuration / 1_000_000 : null,
           });
         }
       }
@@ -184,7 +184,7 @@ export class FFmpegConverter implements VideoConverter {
       throw new Error('Conversion aborted');
     }
 
-    reportProgress('encoding');
+    reportProgress('converting');
 
     // Execute FFmpeg
     await ffmpeg.exec(ffmpegArgs);
@@ -195,7 +195,7 @@ export class FFmpegConverter implements VideoConverter {
       throw new Error('Conversion aborted');
     }
 
-    reportProgress('muxing', 99);
+    reportProgress('finalizing', 99);
 
     // Read output file
     const outputData = await ffmpeg.readFile('output.mp4');
@@ -207,7 +207,7 @@ export class FFmpegConverter implements VideoConverter {
     const compressionRatio = Math.round(((file.size - blob.size) / file.size) * 100);
     const videoBitrate = encodeTime > 0 ? (blob.size * 8 / encodeTime / 1000) : null;
 
-    reportProgress('finalizing', 100);
+    reportProgress('complete', 100);
 
     return {
       blob,

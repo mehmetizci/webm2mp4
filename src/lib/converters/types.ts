@@ -1,8 +1,11 @@
 // Conversion Engine Types
 
+import type { WebCodecsCapabilities } from './webCodecsSupport';
+
 export type ConversionEngine = 'webcodecs' | 'ffmpeg-wasm';
 
-export type ConversionStage =
+// Legacy type - kept for backwards compatibility
+export type LegacyConversionStage =
   | 'preparing'
   | 'demuxing'
   | 'decoding'
@@ -16,7 +19,7 @@ export interface ConversionProgress {
   totalSeconds: number | null;
   encodingSpeed: number | null;
   estimatedRemainingSeconds: number | null;
-  stage: ConversionStage;
+  stage: 'idle' | 'loading' | 'reading' | 'analyzing' | 'converting' | 'finalizing' | 'complete' | 'error';
 }
 
 export interface ConvertOptions {
@@ -25,7 +28,7 @@ export interface ConvertOptions {
   height: number;
   bitrate: number;
   framerate: number;
-  onProgress?: (progress: ConversionProgress) => void;
+  onProgress?: (progress: { percent: number; time: number; stage: string; hasProgress?: boolean; encodedTime?: number | null; encodingSpeed?: number | null; totalDuration?: number | null }) => void;
   signal?: AbortSignal;
 }
 
@@ -100,8 +103,6 @@ export interface WebCodecsSupport {
 }
 
 // Single source of truth for WebCodecs detection state
-import type { WebCodecsCapabilities } from './webCodecsSupport';
-
 export type WebCodecsDetectionStatus = 'idle' | 'checking' | 'completed' | 'failed';
 
 export interface WebCodecsDetectionState {

@@ -158,15 +158,19 @@ export function WebmConverter() {
     
     const savedEngine = localStorage.getItem(STORAGE_KEY) as ConversionEngine | null;
     
-    // Since WebCodecs converter is not yet implemented, default to FFmpeg
-    // In the future, when WebCodecs converter is implemented, we can use:
-    // if (webCodecsDetection.capabilities?.h264Supported) { ... }
-    
-    // Default to FFmpeg WebAssembly (WebCodecs converter not implemented)
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setSelectedEngine('ffmpeg-wasm');
-    updateDebugInfo({ selectedEngine: 'ffmpeg-wasm' });
-  }, [webCodecsDetection.status, updateDebugInfo]);
+    // If WebCodecs is supported and user previously selected it, use WebCodecs
+    // Otherwise default to FFmpeg WebAssembly
+    if (savedEngine === 'webcodecs' && webCodecsDetection.capabilities?.h264Supported) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setSelectedEngine('webcodecs');
+      updateDebugInfo({ selectedEngine: 'webcodecs' });
+    } else {
+      // Default to FFmpeg WebAssembly
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setSelectedEngine('ffmpeg-wasm');
+      updateDebugInfo({ selectedEngine: 'ffmpeg-wasm' });
+    }
+  }, [webCodecsDetection.status, webCodecsDetection.capabilities?.h264Supported, updateDebugInfo]);
 
   // Start WebCodecs detection on mount
   useEffect(() => {
@@ -506,38 +510,93 @@ export function WebmConverter() {
     await requestWakeLock();
 
     try {
-      // Check selected engine and use appropriate converter
-      // Note: WebCodecs converter is not yet implemented, so we always use FFmpeg
-      // In the future, when WebCodecs is implemented, we would check selectedEngine here
-      
-      // For now, always use FFmpeg since WebCodecs converter is not implemented
-      // Set actualEngine to FFmpeg
-      setActualEngine('ffmpeg-wasm');
-      updateDebugInfo({ actualEngineUsed: 'ffmpeg-wasm' });
-      addLog('info', 'Convert', `Motor seçildi: FFmpeg WebAssembly`);
-
-      // FFmpeg yüklenmemişse yükle
-      if (!ffmpegLoaded) {
-        setStage('loading');
-        updateDebugInfo({ ffmpegLoadStatus: 'loading' });
-        addLog('info', 'Load', 'FFmpeg yükleniyor...');
-        const loadSuccess = await loadFFmpeg();
-        if (!loadSuccess) {
-          addLog('error', 'Convert', 'FFmpeg yüklenemedi');
-          setStage('error');
-          return;
+      // Check selected engine
+      if (selectedEngine === 'webcodecs' && webCodecsDetection.capabilities?.h264Supported) {
+        // Use WebCodecs converter
+        setActualEngine('webcodecs');
+        updateDebugInfo({ actualEngineUsed: 'webcodecs' });
+        addLog('info', 'Convert', 'Motor seçildi: WebCodecs');
+        
+        // Import and use WebCodecs converter
+        const { getWebCodecsConverter } = await import('@/lib/converters/webCodecsConverter');
+        const webCodecsConverter = getWebCodecsConverter();
+        
+        try {
+          const result = await webCodecsConverter.convert({
+            file: selectedFile,
+            width: metadata?.width ?? 1280,
+            height: metadata?.height ?? 720,
+            bitrate: 2_000_000, // 2 Mbps
+            framerate: 30,
+            onProgress: (progress) => {
+              if (progress.stage === 'reading' || progress.stage === 'analyzing' || 
+                  progress.stage === 'converting' || progress.stage === 'finalizing' ||
+                  progress.stage === 'complete') {
+                setStage(progress.stage);
+              }
+            },
+          });
+          
+          // Convert to our result format
+          const convertResult = {
+            blob: result.blob,
+            fileName: result.filename,
+            fileSize: result.fileSize,
+            videoDuration: result.duration,
+            conversionTime: result.encodeTime,
+            inputSize: result.inputSize,
+            outputSize: result.fileSize,
+            compressionRatio: result.compressionRatio,
+            videoBitrate: result.videoBitrate ?? undefined,
+            audioBitrate: result.audioBitrate ?? undefined,
+            totalBitrate: (result.videoBitrate ?? 0) + (result.audioBitrate ?? 0) || undefined,
+            encodeTime: result.encodeTime,
+            averageSpeed: result.averageSpeed ?? undefined,
+            hasAudio: result.hasAudio,
+            engine: 'webcodecs' as const,
+          };
+          
+          setResult(convertResult);
+          addLog('success', 'Convert', 'Dönüştürme tamamlandı (WebCodecs)');
+        } catch (webCodecsError) {
+          // WebCodecs failed, fall back to FFmpeg
+          addLog('warning', 'Convert', `WebCodecs hatası: ${webCodecsError instanceof Error ? webCodecsError.message : 'Bilinmeyen hata'}`);
+          addLog('info', 'Convert', 'FFmpeg ile devam ediliyor...');
+          
+          // Fall through to FFmpeg
+          setActualEngine('ffmpeg-wasm');
+          updateDebugInfo({ actualEngineUsed: 'ffmpeg-wasm' });
+          throw webCodecsError; // Rethrow to trigger FFmpeg
         }
-        addLog('success', 'Load', 'FFmpeg hazır');
-      }
+      } else {
+        // Use FFmpeg
+        setActualEngine('ffmpeg-wasm');
+        updateDebugInfo({ actualEngineUsed: 'ffmpeg-wasm' });
+        addLog('info', 'Convert', 'Motor seçildi: FFmpeg WebAssembly');
 
-      addLog('info', 'Convert', 'Dönüştürme başlatılıyor');
-      // Pass video duration and dimensions for accurate progress calculation
-      const videoDuration = metadata?.duration ?? null;
-      const sourceWidth = metadata?.width ?? null;
-      const sourceHeight = metadata?.height ?? null;
-      const convertResult = await convert(selectedFile, settings.quality, setStage, videoDuration, sourceWidth, sourceHeight);
-      setResult(convertResult);
-      addLog('success', 'Convert', 'Dönüştürme tamamlandı');
+        // FFmpeg yüklenmemişse yükle
+        if (!ffmpegLoaded) {
+          setStage('loading');
+          updateDebugInfo({ ffmpegLoadStatus: 'loading' });
+          addLog('info', 'Load', 'FFmpeg yükleniyor...');
+          const loadSuccess = await loadFFmpeg();
+          if (!loadSuccess) {
+            addLog('error', 'Convert', 'FFmpeg yüklenemedi');
+            setStage('error');
+            return;
+          }
+          addLog('success', 'Load', 'FFmpeg hazır');
+        }
+
+        addLog('info', 'Convert', 'Dönüştürme başlatılıyor');
+        // Pass video duration and dimensions for accurate progress calculation
+        const videoDuration = metadata?.duration ?? null;
+        const sourceWidth = metadata?.width ?? null;
+        const sourceHeight = metadata?.height ?? null;
+        const convertResult = await convert(selectedFile, settings.quality, setStage, videoDuration, sourceWidth, sourceHeight);
+        setResult(convertResult);
+        addLog('success', 'Convert', 'Dönüştürme tamamlandı');
+      }
     } catch (err) {
       const error = err instanceof Error ? err : new Error(String(err));
       addLog('error', 'Convert', `HATA: ${error.message}`);
@@ -560,7 +619,7 @@ export function WebmConverter() {
       await releaseWakeLock();
       stopElapsedTimer();
     }
-  }, [selectedFile, ffmpegLoaded, ffmpegError, loadFFmpeg, convert, settings.quality, metadata, resetDebugInfo, setFileInfo, startElapsedTimer, addLog, updateDebugInfo, stopElapsedTimer, requestWakeLock, releaseWakeLock]);
+  }, [selectedFile, selectedEngine, webCodecsDetection.capabilities, ffmpegLoaded, ffmpegError, loadFFmpeg, convert, settings.quality, metadata, resetDebugInfo, setFileInfo, startElapsedTimer, addLog, updateDebugInfo, stopElapsedTimer, requestWakeLock, releaseWakeLock]);
 
   const handleRetry = useCallback(() => {
     updateDebugInfo({ errorCode: null, errorMessage: null, errorStack: null });

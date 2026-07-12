@@ -12,6 +12,8 @@
     "@ffmpeg/ffmpeg": "^0.12.15",
     "@ffmpeg/util": "^0.12.2",
     "lucide-react": "^1.24.0",
+    "mediabunny": "^1.50.8",
+    "mp4box": "^2.4.1",
     "next": "16.2.10",
     "react": "19.2.4",
     "react-dom": "19.2.4"
