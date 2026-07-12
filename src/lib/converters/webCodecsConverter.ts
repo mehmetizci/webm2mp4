@@ -264,62 +264,119 @@ export class WebCodecsConverter implements VideoConverter {
       this.debugInfo.inputFormat = 'WebM';
       console.log('[WebCodecs] Input format:', inputFormat);
       
-      // Get video track info
-      this.debugInfo.inputVideoCodec = 'VP8/VP9/AV1';
-      this.debugInfo.inputAudioCodec = 'Opus/Vorbis';
+      // Get primary video and audio tracks
+      const videoTrack = await input.getPrimaryVideoTrack();
+      if (!videoTrack) {
+        throw new Error('Giriş dosyasında video track bulunamadı.');
+      }
       
-      // Get input duration from metadata FIRST - before any other processing
+      const audioTrack = await input.getPrimaryAudioTrack();
+      const hasInputAudio = audioTrack !== null;
+      
+      // Read actual video metadata from track
+      const videoWidth = await videoTrack.getDisplayWidth();
+      const videoHeight = await videoTrack.getDisplayHeight();
+      const inputVideoCodec = await videoTrack.getCodec();
+      
+      // Validate resolution
+      if (
+        !Number.isFinite(videoWidth) ||
+        !Number.isFinite(videoHeight) ||
+        videoWidth <= 0 ||
+        videoHeight <= 0
+      ) {
+        throw new Error(
+          `Geçersiz video çözünürlüğü: ${videoWidth}x${videoHeight}`
+        );
+      }
+      
+      // Read actual audio codec if available
+      const inputAudioCodec = hasInputAudio ? await audioTrack.getCodec() : null;
+      
+      // Get input duration from metadata
       let inputDuration = 30;
-      let videoWidth = 0;
-      let videoHeight = 0;
-      let videoFrameRate = frameRate;
-      
       try {
         if (input.getDurationFromMetadata) {
           const duration = await input.getDurationFromMetadata();
           inputDuration = typeof duration === 'number' && duration > 0 ? duration : 30;
-          console.log('[WebCodecs] Duration from metadata:', inputDuration);
         }
       } catch (e) {
         console.warn('[WebCodecs] Could not get duration from metadata:', e);
       }
       
+      // Calculate real frame rate from packet stats
+      let detectedFrameRate = frameRate;
+      try {
+        const packetStats = await videoTrack.computePacketStats(120);
+        if (Number.isFinite(packetStats.averagePacketRate) && packetStats.averagePacketRate > 0) {
+          detectedFrameRate = Math.round(packetStats.averagePacketRate);
+        }
+      } catch (e) {
+        console.warn('[WebCodecs] Could not compute packet stats, using default FPS:', e);
+      }
+      
       this.inputDuration = inputDuration;
       
-      // Report analyzing stage WITH duration now available
+      // Update debug info with actual input metadata
+      this.debugInfo.inputWidth = videoWidth;
+      this.debugInfo.inputHeight = videoHeight;
+      this.debugInfo.inputVideoCodec = inputVideoCodec ?? 'unknown';
+      this.debugInfo.inputAudioCodec = inputAudioCodec ?? null;
+      
+      // Log input metadata
+      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      console.log('                    INPUT METADATA                               ');
+      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      console.table({
+        'Input Resolution': `${videoWidth}x${videoHeight}`,
+        'Orientation': videoHeight > videoWidth ? 'vertical' : 'horizontal',
+        'Input Video Codec': inputVideoCodec ?? 'unknown',
+        'Input Audio Codec': inputAudioCodec ?? 'none',
+        'Has Audio': hasInputAudio ? 'Yes' : 'No',
+        'Input Duration': `${inputDuration.toFixed(1)}s`,
+        'Detected Frame Rate': `${detectedFrameRate} fps`,
+      });
+      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      
+      // Report analyzing stage
       this.reportProgress('analyzing', 2, onProgress);
       
-      // Check codec support BEFORE reporting metadata
+      // Check codec support for encoding
       const videoCodecSupport = await canEncodeVideo('avc');
-      const audioCodecSupport = await canEncodeAudio('aac');
+      const canEncodeAac = hasInputAudio ? await canEncodeAudio('aac') : false;
       
       if (!videoCodecSupport) {
         throw new Error('H.264 encoding not supported by this device');
       }
       
-      console.log('[WebCodecs] Video codec support:', videoCodecSupport);
-      console.log('[WebCodecs] Audio codec support:', audioCodecSupport);
+      console.log('[WebCodecs] Can encode video (avc):', videoCodecSupport);
+      console.log('[WebCodecs] Can encode audio (aac):', canEncodeAac);
       
       this.debugInfo.outputVideoCodec = 'H.264';
-      this.debugInfo.outputAudioCodec = audioCodecSupport ? 'AAC' : 'None';
+      this.debugInfo.outputAudioCodec = canEncodeAac ? 'AAC' : 'None';
       
       // Step 2: Calculate encoder configuration based on quality preset
       // Use source resolution by default, or target resolution if specified
       const outputWidth = targetWidth ?? videoWidth;
       const outputHeight = targetHeight ?? videoHeight;
       
-      // Get encoder config with hardware mode
+      // Get encoder config with hardware mode and DETECTED frame rate
       const encoderConfig = getEncoderConfigWithHardwareMode(
         outputWidth,
         outputHeight,
-        frameRate,
+        detectedFrameRate,
         quality as QualityPreset,
         hardwareMode
       );
       
+      // Calculate resolution tier for logging
+      const minDimension = Math.min(outputWidth, outputHeight);
+      let resolutionTier: '480' | '720' | '1080';
+      if (minDimension >= 1080) resolutionTier = '1080';
+      else if (minDimension >= 720) resolutionTier = '720';
+      else resolutionTier = '480';
+      
       // Update debug info with encoder configuration
-      this.debugInfo.inputWidth = videoWidth;
-      this.debugInfo.inputHeight = videoHeight;
       this.debugInfo.outputWidth = outputWidth;
       this.debugInfo.outputHeight = outputHeight;
       this.debugInfo.targetVideoBitrateBps = encoderConfig.videoBitrate;
@@ -338,51 +395,45 @@ export class WebCodecsConverter implements VideoConverter {
         forceTranscode,
       };
       
-      // Enhanced encoder config logging for verification
+      // Enhanced encoder config logging with resolution tier
       console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
       console.log('                    ENCODER CONFIGURATION                        ');
       console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-      console.log(`Quality Preset:     ${quality}`);
-      console.log(`Hardware Mode:      ${hardwareMode}`);
-      console.log(`Input Resolution:  ${videoWidth}x${videoHeight}`);
-      console.log(`Output Resolution: ${outputWidth}x${outputHeight}`);
-      console.log('────────────────────────────────────────────────────────────────');
-      console.log(`Codec:             ${encoderConfig.encoder.codec.toUpperCase()}`);
-      console.log(`Target Video Bitrate: ${(encoderConfig.encoder.bitrate / 1000).toFixed(0)} kbps`);
-      console.log(`Target Total Bitrate: ${((encoderConfig.videoBitrate + encoderConfig.audioBitrate) / 1000).toFixed(0)} kbps`);
-      console.log(`Frame Rate:        ${encoderConfig.encoder.framerate} fps`);
-      console.log(`Hardware Accel:    ${encoderConfig.encoder.hardwareAcceleration}`);
-      console.log(`Key Frame Interval: ${encoderConfig.encoder.keyFrameInterval}s`);
-      console.log(`Audio Bitrate:     ${(encoderConfig.audioBitrate / 1000).toFixed(0)} kbps`);
-      console.log(`Force Transcode:   ${forceTranscode}`);
-      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-      
-      // Log the final options as table
-      console.log('[Encoder Config Table]');
       console.table({
         quality,
         hardwareMode,
-        targetVideoBitrateBps: encoderConfig.encoder.bitrate,
-        targetTotalBitrateBps: encoderConfig.videoBitrate + encoderConfig.audioBitrate,
-        codec: encoderConfig.encoder.codec,
-        frameRate: encoderConfig.encoder.framerate,
-        hardwareAcceleration: encoderConfig.encoder.hardwareAcceleration,
-        forceTranscode,
+        sourceWidth: videoWidth,
+        sourceHeight: videoHeight,
+        outputWidth,
+        outputHeight,
+        orientation: outputHeight > outputWidth ? 'vertical' : 'horizontal',
+        resolutionTier: `${resolutionTier}p`,
+        detectedFrameRate,
+        targetVideoBitrateBps: encoderConfig.videoBitrate,
       });
+      console.log('────────────────────────────────────────────────────────────────');
+      console.log(`Output Codec:          ${encoderConfig.encoder.codec.toUpperCase()}`);
+      console.log(`Target Video Bitrate: ${(encoderConfig.encoder.bitrate / 1000).toFixed(0)} kbps`);
+      console.log(`Target Total Bitrate: ${((encoderConfig.videoBitrate + encoderConfig.audioBitrate) / 1000).toFixed(0)} kbps`);
+      console.log(`Frame Rate:          ${encoderConfig.encoder.framerate} fps`);
+      console.log(`Hardware Acceleration:${encoderConfig.encoder.hardwareAcceleration}`);
+      console.log(`Key Frame Interval:   ${encoderConfig.encoder.keyFrameInterval}s`);
+      console.log(`Audio Bitrate:       ${(encoderConfig.audioBitrate / 1000).toFixed(0)} kbps`);
+      console.log(`Force Transcode:     ${forceTranscode}`);
+      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
       
-      // Report metadata IMMEDIATELY - before any other processing
-      // This allows UI to show duration right away
+      // Report metadata with REAL values - before any other processing
       if (onMetadata) {
         onMetadata({
           totalDurationSeconds: inputDuration,
           width: outputWidth,
           height: outputHeight,
-          frameRate: videoFrameRate,
-          hasAudio: audioCodecSupport, // Assume WebM has audio, AAC will be encoded if supported
-          videoCodec: 'VP8/VP9/AV1',
-          audioCodec: audioCodecSupport ? 'AAC' : null,
+          frameRate: detectedFrameRate,
+          hasAudio: hasInputAudio,
+          videoCodec: inputVideoCodec ?? 'unknown',
+          audioCodec: inputAudioCodec,
         });
-        console.log('[WebCodecs] Metadata reported to UI');
+        console.log('[WebCodecs] Metadata reported to UI with real values');
       }
       
       // Step 3: Create Mediabunny Output for MP4
@@ -416,11 +467,11 @@ export class WebCodecsConverter implements VideoConverter {
         }
       }
       
-      // Build audio options with proper types
-      const audioOptions: ConversionAudioOptions | undefined = audioCodecSupport ? {
+      // Build audio options based on actual audio track presence and AAC encoding support
+      const audioOptions: ConversionAudioOptions | undefined = canEncodeAac ? {
         codec: 'aac',
         bitrate: AUDIO_BITRATE_BPS,
-        forceTranscode: true, // Force transcode for audio
+        forceTranscode: true,
       } : undefined;
       
       // Log final video/audio options before Conversion.init()
@@ -484,8 +535,15 @@ export class WebCodecsConverter implements VideoConverter {
       console.log('discardedTracks:', this.conversion.discardedTracks.length);
       console.log('utilizedTracks:', this.conversion.utilizedTracks.map(t => `${t.type}:${t.codec}`).join(', '));
       
+      // Throw error if conversion is not valid
       if (!this.conversion.isValid) {
-        console.warn('⚠️ Conversion is not valid! Discarded tracks:', this.conversion.discardedTracks);
+        const discardedInfo = this.conversion.discardedTracks.map(item => ({
+          type: item.track.type,
+          reason: item.reason,
+        }));
+        throw new Error(
+          `Mediabunny conversion invalid: ${JSON.stringify(discardedInfo)}`
+        );
       }
       console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
       
@@ -660,9 +718,8 @@ export class WebCodecsConverter implements VideoConverter {
       const videoBitrate = outputAnalysis?.averageVideoBitrate ?? 
         (this.inputDuration > 0 ? (outputBuffer.byteLength * 8 / this.inputDuration) : null);
       
-      // hasAudio depends only on AAC encoding support
-      // (WebM typically has Opus audio, we encode to AAC if supported)
-      const hasAudio = audioCodecSupport;
+      // hasAudio depends on actual input audio track and AAC encoding support
+      const hasAudio = canEncodeAac;
       
       const result: ConversionResult = {
         blob: new Blob([outputBuffer], { type: 'video/mp4' }),
