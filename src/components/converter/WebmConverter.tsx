@@ -722,7 +722,7 @@ export function WebmConverter() {
         )}
 
         {showResult && (
-          <ConversionResult result={result} engine={conversionEngine || 'ffmpeg'} onReset={handleReset} />
+          <ConversionResult result={result} onReset={handleReset} />
         )}
 
         {showError && (

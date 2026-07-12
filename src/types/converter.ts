@@ -52,7 +52,10 @@ export interface ConversionResult {
   blob: Blob;
   fileName: string;
   fileSize: number;
-  duration: number;
+  // Video duration (actual video length being converted)
+  videoDuration: number; // seconds
+  // Conversion duration (wall clock time for the conversion process)
+  conversionTime: number; // seconds
   // Compression stats
   inputSize: number;
   outputSize: number;
@@ -61,8 +64,12 @@ export interface ConversionResult {
   audioBitrate?: number; // kbps
   totalBitrate?: number; // kbps
   // Encoding stats
-  encodeTime?: number; // seconds
+  encodeTime?: number; // seconds (FFmpeg execution time)
   averageSpeed?: number; // e.g., 0.44x
+  // Audio info
+  hasAudio: boolean;
+  // Engine info
+  engine: 'webcodecs' | 'ffmpeg-wasm';
 }
 
 export interface ConversionError {

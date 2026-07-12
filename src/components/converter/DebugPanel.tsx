@@ -366,9 +366,14 @@ export function DebugPanel({ debugInfo, isVisible, webCodecsDetection }: DebugPa
               />
               <DebugRow 
                 label="Worker Sonlandırıldı" 
-                value={debugInfo.cleanupValidation.workerTerminated ? '✓' : '-'} 
+                value={debugInfo.cleanupValidation.workerTerminated ? 'Tamamlandı' : 'Açık Tutuluyor'} 
                 status={debugInfo.cleanupValidation.workerTerminated ? 'completed' : 'idle'}
               />
+              {!debugInfo.cleanupValidation.workerTerminated && (
+                <div className="text-xs text-slate-400 italic">
+                  Sonraki dönüşüm için worker açık tutuluyor
+                </div>
+              )}
               {debugInfo.cleanupDuration !== null && (
                 <DebugRow 
                   label="Cleanup Süresi" 

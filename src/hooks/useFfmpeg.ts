@@ -1030,28 +1030,38 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
     }
     
     const blob = new Blob([uint8Output.buffer as ArrayBuffer], { type: 'video/mp4' });
-    const totalDuration = (Date.now() - startTimeRef.current) / 1000;
+    const conversionTime = (Date.now() - startTimeRef.current) / 1000;
     const encodeTime = (Date.now() - execStartTime) / 1000; // Only FFmpeg execution time
     const inputSize = file.size; // Use original file size for accurate compression calculation
     const outputSize = blob.size;
     const compressionRatio = Math.round(((inputSize - outputSize) / inputSize) * 100);
     
-    // Calculate bitrates based on video duration
-    const videoDurationSeconds = videoDurationRef.current ?? encodeTime * 0.8;
-    const videoBitrateKbps = videoDurationSeconds > 0 ? (outputSize * 8 / 1000 / videoDurationSeconds) : null;
-    const audioBitrateKbps = 96; // Fixed at 96k
+    // Use the video duration from metadata or FFmpeg fallback
+    const videoDurationSeconds = videoDurationRef.current ?? maxEncodedTimeRef.current;
+    // Validate video duration - if it's unreasonably small compared to processed time, use processed time
+    const finalVideoDuration = (videoDurationSeconds > 0 && videoDurationSeconds > maxEncodedTimeRef.current * 0.5) 
+      ? videoDurationSeconds 
+      : maxEncodedTimeRef.current;
+    
+    // Calculate bitrates based on video duration (FFmpeg gives kbps directly, no need to multiply)
+    const videoBitrateKbps = finalVideoDuration > 0 ? (outputSize * 8 / 1000 / finalVideoDuration) : null;
+    // Use actual audio bitrate if audio was present, otherwise 0
+    const audioBitrateKbps = hasAudioDetected ? 96 : 0;
     const totalBitrateKbps = videoBitrateKbps !== null ? videoBitrateKbps + audioBitrateKbps : null;
     
     // Calculate average encoding speed (video seconds per wall clock second)
-    const averageSpeed = encodeTime > 0 ? (videoDurationSeconds / encodeTime) : null;
+    const averageSpeed = encodeTime > 0 ? (finalVideoDuration / encodeTime) : null;
     
-    addLog?.('success', 'Convert', `CONVERSION_COMPLETE: ${totalDuration.toFixed(1)} sn`);
+    addLog?.('success', 'Convert', `CONVERSION_COMPLETE: ${conversionTime.toFixed(1)} sn`);
     addLog?.('info', 'Convert', `Input: ${(inputSize / (1024 * 1024)).toFixed(2)}MB`);
     addLog?.('info', 'Convert', `Output: ${(outputSize / (1024 * 1024)).toFixed(2)}MB`);
     addLog?.('info', 'Convert', `Compression: ${compressionRatio}%`);
-    addLog?.('info', 'Convert', `Encode time: ${encodeTime.toFixed(1)}s, Speed: ${averageSpeed?.toFixed(2) ?? '-'}x`);
+    addLog?.('info', 'Convert', `Video süresi: ${finalVideoDuration.toFixed(2)}sn, Encode süresi: ${encodeTime.toFixed(1)}s, Hız: ${averageSpeed?.toFixed(2) ?? '-'}x`);
     if (totalBitrateKbps !== null) {
       addLog?.('info', 'Convert', `Total bitrate: ${totalBitrateKbps.toFixed(0)}kbps`);
+    }
+    if (!hasAudioDetected) {
+      addLog?.('info', 'Convert', 'Ses: Çıktıda ses bulunamadı');
     }
 
     // Update debug info with compression and encoding stats
@@ -1064,6 +1074,8 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
       totalBitrate: totalBitrateKbps,
       encodeTime,
       averageSpeed,
+      totalDuration: finalVideoDuration,
+      actualEngineUsed: 'ffmpeg',
     });
 
     // Mark conversion as succeeded before cleanup (used by log handler to ignore abort errors)
@@ -1076,7 +1088,8 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
       blob,
       fileName: getOutputFileName(file.name),
       fileSize: blob.size,
-      duration: totalDuration,
+      videoDuration: finalVideoDuration,
+      conversionTime,
       inputSize,
       outputSize,
       compressionRatio,
@@ -1085,6 +1098,8 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
       totalBitrate: totalBitrateKbps ?? undefined,
       encodeTime,
       averageSpeed: averageSpeed ?? undefined,
+      hasAudio: hasAudioDetected,
+      engine: 'ffmpeg-wasm',
     };
   }, [updateProgress, clearAllTimeouts, addLog, updateDebugInfo, normalizeError, cleanupResources, preCleanup]);
 
