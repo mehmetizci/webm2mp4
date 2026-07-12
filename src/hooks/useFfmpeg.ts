@@ -714,14 +714,28 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
       lastActivityRef.current = Date.now();
       
       // Detect audio stream in FFmpeg output
-      if (!hasAudioDetected && /Audio:/i.test(message)) {
+      // Only count as audio if it's NOT "audio:0kB" which means no audio
+      if (!hasAudioDetected && /Audio:/i.test(message) && !/audio:0kB/i.test(message)) {
         hasAudioDetected = true;
         addLog?.('info', 'Convert', 'Audio stream detected - AAC encoding enabled');
       }
       
+      // Detect when there's NO audio (audio:0kB)
+      if (/audio:0kB/i.test(message)) {
+        hasAudioDetected = false;
+        addLog?.('info', 'Convert', 'Çıktıda ses bulunamadı (audio:0kB)');
+      }
+      
       // Ignore "Aborted()" messages that occur after successful completion
+      // These are normal - they happen when worker is terminated after cleanup
       if (conversionSucceeded && /Aborted\(\)/i.test(message)) {
         return; // Skip logging aborted errors after success
+      }
+      
+      // Also filter out "Aborted()" during cleanup - log at debug level
+      if (/Aborted\(\)/i.test(message)) {
+        // Don't log this as an error - it's expected during cleanup
+        return;
       }
       
       if (message === lastFFmpegMessageRef.current) return;

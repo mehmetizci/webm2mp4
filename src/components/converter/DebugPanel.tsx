@@ -321,7 +321,7 @@ export function DebugPanel({ debugInfo, isVisible, webCodecsDetection, selectedE
           <DebugSection title="Dönüşüm Motoru">
             <DebugRow 
               label="Seçilen Motor" 
-              value={selectedEngine === 'webcodecs' ? 'WebCodecs' : selectedEngine === 'ffmpeg-wasm' ? 'FFmpeg WebAssembly' : null} 
+              value={selectedEngine === 'webcodecs' ? 'WebCodecs' : selectedEngine === 'ffmpeg-wasm' ? 'FFmpeg WebAssembly' : '-'} 
             />
             <DebugRow 
               label="H.264 Destekli" 
@@ -330,18 +330,39 @@ export function DebugPanel({ debugInfo, isVisible, webCodecsDetection, selectedE
             />
             <DebugRow 
               label="Gerçekte Kullanılan" 
-              value={actualEngine === 'webcodecs' ? 'WebCodecs' : actualEngine === 'ffmpeg-wasm' ? 'FFmpeg WebAssembly' : null} 
+              value={actualEngine === 'webcodecs' ? 'WebCodecs' : actualEngine === 'ffmpeg-wasm' ? 'FFmpeg WebAssembly' : 'Henüz kullanılmadı'} 
             />
           </DebugSection>
 
-          {/* Conversion Status */}
-          <DebugSection title="Dönüşüm Durumu">
-            <DebugRow label="FFmpeg Yükleme" value={debugInfo.ffmpegLoadStatus} status={debugInfo.ffmpegLoadStatus} />
-            <DebugRow label="Core JS Yükleme" value={debugInfo.coreJsLoadStatus} status={debugInfo.coreJsLoadStatus} />
-            <DebugRow label="WASM Yükleme" value={debugInfo.wasmLoadStatus} status={debugInfo.wasmLoadStatus} />
-            <DebugRow label="Dosya Yazma" value={debugInfo.fileWriteStatus} status={debugInfo.fileWriteStatus} />
-            <DebugRow label="FFmpeg Dönüşüm" value={debugInfo.ffmpegExecStatus} status={debugInfo.ffmpegExecStatus} />
-          </DebugSection>
+          {/* Show WebCodecs info when selected/used */}
+          {actualEngine === 'webcodecs' && (
+            <DebugSection title="WebCodecs Durumu">
+              <DebugRow 
+                label="Mediabunny API" 
+                value="Evet" 
+                status="completed"
+              />
+              <DebugRow 
+                label="FFmpeg Yükleme" 
+                value="Uygulanmadı" 
+              />
+              <DebugRow 
+                label="FFmpeg Exec" 
+                value="Uygulanmadı" 
+              />
+            </DebugSection>
+          )}
+
+          {/* Conversion Status - only show FFmpeg details when using FFmpeg */}
+          {actualEngine !== 'webcodecs' && (
+            <DebugSection title="FFmpeg Durumu">
+              <DebugRow label="FFmpeg Yükleme" value={debugInfo.ffmpegLoadStatus} status={debugInfo.ffmpegLoadStatus} />
+              <DebugRow label="Core JS Yükleme" value={debugInfo.coreJsLoadStatus} status={debugInfo.coreJsLoadStatus} />
+              <DebugRow label="WASM Yükleme" value={debugInfo.wasmLoadStatus} status={debugInfo.wasmLoadStatus} />
+              <DebugRow label="Dosya Yazma" value={debugInfo.fileWriteStatus} status={debugInfo.fileWriteStatus} />
+              <DebugRow label="FFmpeg Dönüşüm" value={debugInfo.ffmpegExecStatus} status={debugInfo.ffmpegExecStatus} />
+            </DebugSection>
+          )}
 
           {/* Cleanup Validation */}
           {debugInfo.cleanupValidation && (

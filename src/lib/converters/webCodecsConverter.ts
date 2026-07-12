@@ -122,10 +122,14 @@ export class WebCodecsConverter implements VideoConverter {
       this.debugInfo.inputFormat = 'WebM';
       console.log('[WebCodecs] Input format:', inputFormat);
       
+      // Check if input has audio track
+      const hasInputAudio = inputFormat.audioTracks && inputFormat.audioTracks.length > 0;
+      console.log('[WebCodecs] Input has audio:', hasInputAudio);
+      
       // Get video track info
       const format = await input.getFormat();
       this.debugInfo.inputVideoCodec = 'VP8/VP9/AV1';
-      this.debugInfo.inputAudioCodec = 'Opus/Vorbis';
+      this.debugInfo.inputAudioCodec = hasInputAudio ? 'Opus/Vorbis' : null;
       
       // Report analyzing progress
       this.reportProgress('analyzing', 5, onProgress);
@@ -235,6 +239,9 @@ export class WebCodecsConverter implements VideoConverter {
         ? (outputBuffer.byteLength * 8 / this.inputDuration)
         : null;
       
+      // Only include audio if input had audio AND device supports AAC encoding
+      const hasAudio = hasInputAudio && audioCodecSupport;
+      
       const result: ConversionResult = {
         blob: new Blob([outputBuffer], { type: 'video/mp4' }),
         filename: getOutputFileName(file.name),
@@ -242,12 +249,12 @@ export class WebCodecsConverter implements VideoConverter {
         inputSize: file.size,
         duration: this.inputDuration,
         videoBitrate: videoBitrate ?? null,
-        audioBitrate: audioCodecSupport ? 128 : null,
+        audioBitrate: hasAudio ? 128 : null,
         compressionRatio,
         encodeTime,
         averageSpeed: encodeTime > 0 ? this.inputDuration / encodeTime : null,
         engine: 'webcodecs',
-        hasAudio: audioCodecSupport,
+        hasAudio,
       };
       
       this.reportProgress('complete', 100, onProgress);

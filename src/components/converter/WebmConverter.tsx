@@ -473,19 +473,10 @@ export function WebmConverter() {
     setFileInfo(file.name, file.size, file.type);
     addLog('info', 'File', `Dosya seçildi: ${file.name} (${(file.size / (1024 * 1024)).toFixed(2)}MB)`);
 
-    // FFmpeg yüklenmemişse yükle
-    if (!ffmpegLoaded) {
-      addLog('info', 'Load', 'FFmpeg yükleniyor...');
-      updateDebugInfo({ ffmpegLoadStatus: 'loading' });
-      const loadSuccess = await loadFFmpeg();
-      if (!loadSuccess) {
-        addLog('error', 'Load', 'FFmpeg yüklenemedi');
-        updateDebugInfo({ ffmpegLoadStatus: 'error' });
-        return;
-      }
-      addLog('success', 'Load', 'FFmpeg hazır');
-    }
-  }, [ffmpegLoaded, loadFFmpeg, resetDebugInfo, setFileInfo, addLog, updateDebugInfo]);
+    // Don't pre-load FFmpeg - only load when user explicitly selects FFmpeg for conversion
+    // This allows WebCodecs to be used without loading FFmpeg
+    addLog('info', 'Load', 'Motor seçimi bekleniyor...');
+  }, [resetDebugInfo, setFileInfo, addLog]);
 
   const handleRemoveFile = useCallback(() => {
     setSelectedFile(null);
@@ -497,6 +488,13 @@ export function WebmConverter() {
 
   const handleConvert = useCallback(async () => {
     if (!selectedFile) return;
+    if (!selectedEngine) {
+      addLog('error', 'Convert', 'Motor seçilmedi');
+      return;
+    }
+
+    console.log('[Convert] Selected engine:', selectedEngine);
+    console.log('[Convert] H264 supported:', webCodecsDetection.capabilities?.h264Supported);
 
     setConversionError(null);
     setResult(null);
@@ -510,12 +508,18 @@ export function WebmConverter() {
     await requestWakeLock();
 
     try {
-      // Check selected engine
-      if (selectedEngine === 'webcodecs' && webCodecsDetection.capabilities?.h264Supported) {
+      // Check selected engine - only use WebCodecs if explicitly selected AND h264 is supported
+      const shouldUseWebCodecs = 
+        selectedEngine === 'webcodecs' && 
+        webCodecsDetection.status === 'completed' && 
+        webCodecsDetection.capabilities?.h264Supported === true;
+
+      if (shouldUseWebCodecs) {
         // Use WebCodecs converter
         setActualEngine('webcodecs');
         updateDebugInfo({ actualEngineUsed: 'webcodecs' });
-        addLog('info', 'Convert', 'Motor seçildi: WebCodecs');
+        addLog('info', 'Convert', '[WebCodecs] Conversion started with Mediabunny');
+        console.log('[WebCodecs] Conversion started with Mediabunny');
         
         // Import and use WebCodecs converter
         const { getWebCodecsConverter } = await import('@/lib/converters/webCodecsConverter');
@@ -524,11 +528,10 @@ export function WebmConverter() {
         try {
           const result = await webCodecsConverter.convert({
             file: selectedFile,
-            width: metadata?.width ?? 1280,
-            height: metadata?.height ?? 720,
             bitrate: 2_000_000, // 2 Mbps
             framerate: 30,
             onProgress: (progress) => {
+              console.log('[WebCodecs] Progress:', progress);
               if (progress.stage === 'reading' || progress.stage === 'analyzing' || 
                   progress.stage === 'converting' || progress.stage === 'finalizing' ||
                   progress.stage === 'complete') {
@@ -536,6 +539,14 @@ export function WebmConverter() {
               }
             },
           });
+          
+          console.log('[WebCodecs] Conversion result:', result);
+          
+          // Calculate bitrates from actual output
+          const videoDuration = result.duration;
+          const videoBitrate = videoDuration > 0 ? (result.fileSize * 8 / videoDuration / 1000) : null;
+          const audioBitrate = result.hasAudio ? (result.audioBitrate ?? 128) : 0;
+          const totalBitrate = videoBitrate !== null ? videoBitrate + audioBitrate : null;
           
           // Convert to our result format
           const convertResult = {
@@ -547,32 +558,34 @@ export function WebmConverter() {
             inputSize: result.inputSize,
             outputSize: result.fileSize,
             compressionRatio: result.compressionRatio,
-            videoBitrate: result.videoBitrate ?? undefined,
-            audioBitrate: result.audioBitrate ?? undefined,
-            totalBitrate: (result.videoBitrate ?? 0) + (result.audioBitrate ?? 0) || undefined,
+            videoBitrate: videoBitrate ?? undefined,
+            audioBitrate: result.hasAudio ? audioBitrate : 0,
+            totalBitrate: totalBitrate ?? undefined,
             encodeTime: result.encodeTime,
             averageSpeed: result.averageSpeed ?? undefined,
             hasAudio: result.hasAudio,
             engine: 'webcodecs' as const,
           };
           
-          setResult(convertResult);
-          addLog('success', 'Convert', 'Dönüştürme tamamlandı (WebCodecs)');
-        } catch (webCodecsError) {
-          // WebCodecs failed, fall back to FFmpeg
-          addLog('warning', 'Convert', `WebCodecs hatası: ${webCodecsError instanceof Error ? webCodecsError.message : 'Bilinmeyen hata'}`);
-          addLog('info', 'Convert', 'FFmpeg ile devam ediliyor...');
+          // Force progress to 100 on completion
+          updateDebugInfo({ lastProgressValue: 100 });
           
-          // Fall through to FFmpeg
-          setActualEngine('ffmpeg-wasm');
-          updateDebugInfo({ actualEngineUsed: 'ffmpeg-wasm' });
-          throw webCodecsError; // Rethrow to trigger FFmpeg
+          setResult(convertResult);
+          setStage('complete');
+          addLog('success', 'Convert', 'Dönüştürme tamamlandı (WebCodecs)');
+          return; // Don't fall through to FFmpeg
+        } catch (webCodecsError) {
+          // WebCodecs failed - do NOT fall back to FFmpeg automatically
+          // User selected WebCodecs, so report the error
+          addLog('error', 'Convert', `WebCodecs hatası: ${webCodecsError instanceof Error ? webCodecsError.message : 'Bilinmeyen hata'}`);
+          throw webCodecsError;
         }
       } else {
-        // Use FFmpeg
+        // Use FFmpeg WebAssembly
         setActualEngine('ffmpeg-wasm');
         updateDebugInfo({ actualEngineUsed: 'ffmpeg-wasm' });
-        addLog('info', 'Convert', 'Motor seçildi: FFmpeg WebAssembly');
+        addLog('info', 'Convert', '[FFmpeg] Conversion started');
+        console.log('[FFmpeg] Conversion started');
 
         // FFmpeg yüklenmemişse yükle
         if (!ffmpegLoaded) {
@@ -594,14 +607,19 @@ export function WebmConverter() {
         const sourceWidth = metadata?.width ?? null;
         const sourceHeight = metadata?.height ?? null;
         const convertResult = await convert(selectedFile, settings.quality, setStage, videoDuration, sourceWidth, sourceHeight);
+        
+        // Force progress to 100 on completion
+        updateDebugInfo({ lastProgressValue: 100 });
+        
         setResult(convertResult);
-        addLog('success', 'Convert', 'Dönüştürme tamamlandı');
+        addLog('success', 'Convert', 'Dönüştürme tamamlandı (FFmpeg)');
+        return;
       }
     } catch (err) {
       const error = err instanceof Error ? err : new Error(String(err));
       addLog('error', 'Convert', `HATA: ${error.message}`);
       
-      const conversionErrorObj = ffmpegError || {
+      const conversionErrorObj = {
         code: 'CONVERSION_ERROR',
         message: 'Video dönüştürülürken bir hata oluştu.',
         technical: error.message,
@@ -619,7 +637,7 @@ export function WebmConverter() {
       await releaseWakeLock();
       stopElapsedTimer();
     }
-  }, [selectedFile, selectedEngine, webCodecsDetection.capabilities, ffmpegLoaded, ffmpegError, loadFFmpeg, convert, settings.quality, metadata, resetDebugInfo, setFileInfo, startElapsedTimer, addLog, updateDebugInfo, stopElapsedTimer, requestWakeLock, releaseWakeLock]);
+  }, [selectedFile, selectedEngine, webCodecsDetection.status, webCodecsDetection.capabilities, ffmpegLoaded, loadFFmpeg, convert, settings.quality, metadata, resetDebugInfo, setFileInfo, startElapsedTimer, addLog, updateDebugInfo, stopElapsedTimer, requestWakeLock, releaseWakeLock]);
 
   const handleRetry = useCallback(() => {
     updateDebugInfo({ errorCode: null, errorMessage: null, errorStack: null });
