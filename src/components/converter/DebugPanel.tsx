@@ -337,12 +337,23 @@ export function DebugPanel({ debugInfo, isVisible, webCodecsDetection, selectedE
 
           {/* Show WebCodecs info when selected/used */}
           {actualEngine === 'webcodecs' && (
-            <DebugSection title="WebCodecs Durumu">
+            <DebugSection title="WebCodecs Pipeline">
+              <DebugRow 
+                label="Pipeline" 
+                value={debugInfo.webCodecsPipeline === 'Low Level' ? 'Düşük Seviyesi' : debugInfo.webCodecsPipeline ?? '-'} 
+                status={debugInfo.webCodecsPipeline === 'Low Level' ? 'completed' : undefined}
+              />
               <DebugRow 
                 label="Mediabunny API" 
                 value="Evet" 
                 status="completed"
               />
+              {debugInfo.webCodecsConversionId && (
+                <DebugRow 
+                  label="Conversion ID" 
+                  value={debugInfo.webCodecsConversionId.substring(0, 20) + '...'} 
+                />
+              )}
               {debugInfo.totalDuration && (
                 <>
                   <DebugRow 
@@ -420,6 +431,25 @@ export function DebugPanel({ debugInfo, isVisible, webCodecsDetection, selectedE
                 label="Force Transcode" 
                 value={debugInfo.webCodecsEncoderConfig.forceTranscode ? 'Evet' : 'Hayır'} 
               />
+              {debugInfo.webCodecsBitrateModeRequested && (
+                <DebugRow 
+                  label="Bitrate Mode (İstenen)" 
+                  value={debugInfo.webCodecsBitrateModeRequested} 
+                />
+              )}
+              {debugInfo.webCodecsEncoderConfig.bitrateMode && (
+                <DebugRow 
+                  label="Bitrate Mode (Gerçek)" 
+                  value={debugInfo.webCodecsEncoderConfig.bitrateMode} 
+                />
+              )}
+              {debugInfo.webCodecsBitrateModeSupported !== null && (
+                <DebugRow 
+                  label="Bitrate Mode Destekli" 
+                  value={debugInfo.webCodecsBitrateModeSupported ? 'Evet' : 'Hayır'} 
+                  status={debugInfo.webCodecsBitrateModeSupported ? 'completed' : 'warning'}
+                />
+              )}
             </DebugSection>
           )}
 

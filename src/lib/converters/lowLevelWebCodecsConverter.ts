@@ -3,8 +3,7 @@
 // Architecture: Mediabunny (demux/sink) → VideoSampleSource (custom encoder) → Output (mux)
 
 import type { QualityPreset } from '@/types/converter';
-import { getEncoderConfigWithHardwareMode } from './qualityConfig';
-import type { HardwareMode, EncoderConfig } from './qualityConfig';
+import { getEncoderConfigWithHardwareMode, type HardwareMode } from './qualityConfig';
 import { getOutputFileName } from '@/lib/file-utils';
 
 // Mediabunny imports
@@ -29,13 +28,6 @@ import type {
 import type { VideoConverter, ConvertOptions, ConversionResult, ConverterSupport } from './types';
 import type { OutputAnalysis } from './types';
 import { checkWebCodecsSupport } from './webCodecsSupport';
-
-// Quality presets in bps
-const QUALITY_BITRATES = {
-  small: 600_000,
-  standard: 1_000_000,
-  high: 1_800_000,
-} as const;
 
 // Audio bitrate constant (128 kbps AAC)
 const AUDIO_BITRATE_BPS = 128_000;
@@ -366,15 +358,18 @@ export class LowLevelWebCodecsConverter implements VideoConverter {
       else if (minDimension >= 720) resolutionTier = '720';
       else resolutionTier = '480';
 
-      // Calculate target bitrate
-      let targetVideoBitrateBps: number;
-      if (targetBitrateBps) {
-        // Extreme test override
-        targetVideoBitrateBps = targetBitrateBps;
-      } else {
-        // Use quality preset
-        targetVideoBitrateBps = QUALITY_BITRATES[quality] ?? QUALITY_BITRATES.standard;
-      }
+      // Get encoder config from single source of truth
+      // This provides bitrate based on resolution, orientation, FPS, quality, and hardware mode
+      const encoderConfig = getEncoderConfigWithHardwareMode(
+        outputWidth,
+        outputHeight,
+        detectedFrameRate,
+        quality,
+        hardwareMode
+      );
+
+      // Use encoder config bitrate or override for extreme testing
+      const targetVideoBitrateBps = targetBitrateBps ?? encoderConfig.bitrate;
 
       // Create VideoEncoderConfig with constant bitrate mode
       const bitrateMode: 'constant' | 'variable' = 'constant';
@@ -385,7 +380,7 @@ export class LowLevelWebCodecsConverter implements VideoConverter {
         bitrate: targetVideoBitrateBps,
         bitrateMode,
         latencyMode,
-        hardwareAcceleration: hardwareMode as 'no-preference' | 'prefer-hardware' | 'prefer-software',
+        hardwareAcceleration: hardwareMode,
         keyFrameInterval: 2,
         onEncoderConfig: (config) => {
           // Log the actual encoder config that was created
@@ -398,9 +393,17 @@ export class LowLevelWebCodecsConverter implements VideoConverter {
             bitrate: config.bitrate,
             latencyMode: config.latencyMode,
             // @ts-ignore - bitrateMode might not be in VideoEncoderConfig type
-            bitrateMode: config.bitrateMode ?? 'N/A',
+            bitrateMode: (config as Record<string, unknown>).bitrateMode ?? 'N/A',
           });
-          this.debugInfo.bitrateModeSupported = config.latencyMode === latencyMode;
+          // Check if encoder returned bitrateMode - this indicates browser support
+          const returnedBitrateMode = (config as Record<string, unknown>).bitrateMode;
+          if (returnedBitrateMode !== undefined) {
+            this.debugInfo.bitrateModeSupported = returnedBitrateMode === bitrateMode;
+          } else {
+            // Browser encoder did not return bitrateMode
+            this.debugInfo.bitrateModeSupported = false;
+            console.warn('[Encoder] Tarayıcı encoder config içinde bitrateMode döndürmedi');
+          }
         },
       };
 

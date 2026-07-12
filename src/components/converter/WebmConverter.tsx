@@ -541,25 +541,14 @@ export function WebmConverter() {
         // Use WebCodecs converter
         setActualEngine('webcodecs');
         updateDebugInfo({ actualEngineUsed: 'webcodecs' });
-        addLog('info', 'Convert', '[WebCodecs] Conversion started with Mediabunny');
-        console.log('[WebCodecs] Conversion started with Mediabunny');
         
-        // Use low-level converter for accurate bitrate control
-        // Set NEXT_PUBLIC_USE_LOW_LEVEL_CONVERTER=true in environment to enable
-        const useLowLevel = process.env.NEXT_PUBLIC_USE_LOW_LEVEL_CONVERTER === 'true';
+        // Always use low-level converter for accurate bitrate control
+        console.log('[WebCodecs] Converter implementation: LOW_LEVEL');
+        console.log('[WebCodecs] Using LOW-LEVEL converter for accurate bitrate control');
+        addLog('info', 'Convert', '[WebCodecs] Converter implementation: LOW_LEVEL');
         
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        let converter: any;
-        
-        if (useLowLevel) {
-          console.log('[WebCodecs] Using LOW-LEVEL converter for accurate bitrate control');
-          const { LowLevelWebCodecsConverter } = await import('@/lib/converters/lowLevelWebCodecsConverter');
-          converter = new LowLevelWebCodecsConverter();
-        } else {
-          console.log('[WebCodecs] Using standard Mediabunny converter');
-          const { getWebCodecsConverter } = await import('@/lib/converters/webCodecsConverter');
-          converter = getWebCodecsConverter();
-        }
+        const { LowLevelWebCodecsConverter } = await import('@/lib/converters/lowLevelWebCodecsConverter');
+        const converter = new LowLevelWebCodecsConverter();
         
         try {
           // Initialize WebCodecs progress state
@@ -632,7 +621,7 @@ export function WebmConverter() {
           
           console.log('[WebCodecs] Conversion result:', result);
           
-          // Get encoder debug info from converter
+          // Get encoder debug info from LowLevelWebCodecsConverter
           const encoderDebugInfo = converter.getDebugInfo();
           
           // Calculate bitrates - all in bps
@@ -650,27 +639,33 @@ export function WebmConverter() {
           // Audio bitrate (in bps)
           const audioBitrateBps = result.hasAudio ? 128_000 : 0;
           
-          // Update debug info with encoder configuration (values in bps)
+          // Update debug info with encoder configuration from LowLevelWebCodecsConverter
           updateDebugInfo({
             lastProgressValue: 100,
             webCodecsEncoderConfig: encoderDebugInfo.encoderConfig ? {
               codec: encoderDebugInfo.encoderConfig.codec,
-              targetBitrate: encoderDebugInfo.encoderConfig.bitrate, // In bps
+              targetBitrate: encoderDebugInfo.encoderConfig.bitrate,
               framerate: encoderDebugInfo.encoderConfig.framerate,
               hardwareAcceleration: encoderDebugInfo.encoderConfig.hardwareAcceleration,
               keyFrameInterval: encoderDebugInfo.encoderConfig.keyFrameInterval,
               forceTranscode: encoderDebugInfo.encoderConfig.forceTranscode,
+              bitrateMode: encoderDebugInfo.encoderConfig.bitrateMode,
+              latencyMode: encoderDebugInfo.encoderConfig.latencyMode,
             } : null,
-            webCodecsActualBitrate: videoBitrateBps, // In bps
+            webCodecsActualBitrate: videoBitrateBps,
             webCodecsBitrateDifference: result.outputAnalysis?.bitrateDifference ?? null,
             webCodecsOutputWidth: encoderDebugInfo.outputWidth || null,
             webCodecsOutputHeight: encoderDebugInfo.outputHeight || null,
             webCodecsQualityPreset: encoderDebugInfo.qualityPreset || 'standard',
             webCodecsHardwareMode: encoderDebugInfo.hardwareMode || 'no-preference',
             webCodecsIsValid: encoderDebugInfo.isValid ?? false,
-            videoBitrate: videoBitrateBps, // In bps
-            audioBitrate: audioBitrateBps, // In bps
-            totalBitrate: totalBitrateBps, // In bps
+            webCodecsBitrateModeSupported: encoderDebugInfo.bitrateModeSupported ?? false,
+            webCodecsBitrateModeRequested: encoderDebugInfo.bitrateModeRequested ?? 'constant',
+            webCodecsConversionId: encoderDebugInfo.conversionId,
+            webCodecsPipeline: 'Low Level',
+            videoBitrate: videoBitrateBps,
+            audioBitrate: audioBitrateBps,
+            totalBitrate: totalBitrateBps,
           });
           
           // Convert to our result format (values in bps)
@@ -699,10 +694,16 @@ export function WebmConverter() {
           addLog('success', 'Convert', 'Dönüştürme tamamlandı (WebCodecs)');
           return; // Don't fall through to FFmpeg
         } catch (webCodecsError) {
-          // WebCodecs failed - do NOT fall back to FFmpeg automatically
-          // User selected WebCodecs, so report the error
-          addLog('error', 'Convert', `WebCodecs hatası: ${webCodecsError instanceof Error ? webCodecsError.message : 'Bilinmeyen hata'}`);
-          throw webCodecsError;
+          // LowLevelWebCodecsConverter failed
+          const errorMessage = webCodecsError instanceof Error ? webCodecsError.message : 'Bilinmeyen hata';
+          addLog('error', 'Convert', `Düşük seviyeli WebCodecs dönüşümü başarısız: ${errorMessage}`);
+          
+          // Show modal to user with fallback options
+          setFallbackError('Düşük seviyeli WebCodecs dönüşümü başarısız oldu: ' + errorMessage);
+          setShowFallbackPrompt(true);
+          
+          // Don't throw - let user choose fallback option
+          return;
         }
       } else {
         // Use FFmpeg WebAssembly

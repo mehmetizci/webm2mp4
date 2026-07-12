@@ -77,6 +77,8 @@ export interface ConversionDebugInfo {
     hardwareAcceleration: string;
     keyFrameInterval: number;
     forceTranscode: boolean;
+    bitrateMode?: string;
+    latencyMode?: string;
   } | null;
   webCodecsActualBitrate: number | null;
   webCodecsBitrateDifference: number | null;
@@ -85,6 +87,11 @@ export interface ConversionDebugInfo {
   webCodecsQualityPreset: string | null;
   webCodecsHardwareMode: string | null;
   webCodecsIsValid: boolean | null;
+  // Low-level converter specific
+  webCodecsBitrateModeSupported: boolean | null;
+  webCodecsBitrateModeRequested: string | null;
+  webCodecsConversionId: string | null;
+  webCodecsPipeline: 'Low Level' | 'Standard' | null;
   // Cleanup status
   cleanupStatus: 'idle' | 'cleaning' | 'completed' | 'warning' | 'error';
   cleanupValidation: {
@@ -330,6 +337,11 @@ const initialDebugInfo: ConversionDebugInfo = {
   webCodecsQualityPreset: null,
   webCodecsHardwareMode: null,
   webCodecsIsValid: null,
+  // Low-level converter specific
+  webCodecsBitrateModeSupported: null,
+  webCodecsBitrateModeRequested: null,
+  webCodecsConversionId: null,
+  webCodecsPipeline: null,
   // Cleanup status
   cleanupStatus: 'idle',
   cleanupValidation: null,
