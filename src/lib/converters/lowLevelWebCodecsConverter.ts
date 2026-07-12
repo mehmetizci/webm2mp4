@@ -369,7 +369,7 @@ export class LowLevelWebCodecsConverter implements VideoConverter {
       );
 
       // Use encoder config bitrate or override for extreme testing
-      const targetVideoBitrateBps = targetBitrateBps ?? encoderConfig.bitrate;
+      const targetVideoBitrateBps = targetBitrateBps ?? encoderConfig.encoder.bitrate;
 
       // Create VideoEncoderConfig with constant bitrate mode
       const bitrateMode: 'constant' | 'variable' = 'constant';
