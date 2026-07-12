@@ -549,6 +549,12 @@ export class LowLevelWebCodecsConverter implements VideoConverter {
       let audioSampleCount = 0;
       const startTimeMs = Date.now();
       
+      // Performance measurement
+      let totalSampleReadTimeMs = 0;
+      let totalVideoAddTimeMs = 0;
+      let totalAudioAddTimeMs = 0;
+      let sampleReadStartTime = 0;
+      
       // Track processed time based on sample timestamps
       const updateProcessedSeconds = (sampleTimestamp: number, sampleDuration: number) => {
         // Mediabunny timestamps are in SECONDS
@@ -598,8 +604,10 @@ export class LowLevelWebCodecsConverter implements VideoConverter {
       const getNextVideoSample = async () => {
         if (videoIteratorDone) return null;
         if (!nextVideoSample) {
+          sampleReadStartTime = performance.now();
           // @ts-ignore - async iterator
           nextVideoSample = await videoSink.samples().next();
+          totalSampleReadTimeMs += performance.now() - sampleReadStartTime;
         }
         if (nextVideoSample?.done) {
           videoIteratorDone = true;
@@ -615,8 +623,10 @@ export class LowLevelWebCodecsConverter implements VideoConverter {
       const getNextAudioSample = async () => {
         if (audioIteratorDone || !audioSink) return null;
         if (!nextAudioSample) {
+          sampleReadStartTime = performance.now();
           // @ts-ignore - async iterator
           nextAudioSample = await audioSink.samples().next();
+          totalSampleReadTimeMs += performance.now() - sampleReadStartTime;
         }
         if (nextAudioSample?.done) {
           audioIteratorDone = true;
@@ -663,7 +673,11 @@ export class LowLevelWebCodecsConverter implements VideoConverter {
           updateProcessedSeconds(vs.timestamp, vs.duration ?? (1 / detectedFrameRate));
           updateProgress();
           
+          // Measure video add time
+          const videoAddStart = performance.now();
           await this.videoEncoderSource.add(vs);
+          totalVideoAddTimeMs += performance.now() - videoAddStart;
+          
           videoFrameCount++;
           vs.close();
         } else if (audioSample) {
@@ -674,7 +688,11 @@ export class LowLevelWebCodecsConverter implements VideoConverter {
           // Update processed seconds from audio sample timestamp
           updateProcessedSeconds(as.timestamp, as.duration ?? 0.02); // ~20ms default audio frame
           
+          // Measure audio add time
+          const audioAddStart = performance.now();
           await this.audioEncoderSource.add(as);
+          totalAudioAddTimeMs += performance.now() - audioAddStart;
+          
           audioSampleCount++;
           as.close();
         }
@@ -697,6 +715,9 @@ export class LowLevelWebCodecsConverter implements VideoConverter {
       // Step 10: Finalize output
       this.reportProgress('finalizing', 95, onProgress);
       console.log('[Output] Finalizing...');
+      
+      // Measure finalize time
+      const finalizeStartTime = performance.now();
 
       if (this.videoEncoderSource) {
         // @ts-ignore - VideoSampleSource might have end method
@@ -708,6 +729,7 @@ export class LowLevelWebCodecsConverter implements VideoConverter {
       }
 
       await this.output.finalize();
+      const finalizeTimeMs = performance.now() - finalizeStartTime;
       console.log('[Output] Finalized');
 
       // Step 12: Get output buffer
@@ -732,6 +754,12 @@ export class LowLevelWebCodecsConverter implements VideoConverter {
         const outputVideoTrack = await analysisInput.getPrimaryVideoTrack();
         const outputAudioTrack = await analysisInput.getPrimaryAudioTrack();
         const hasOutputAudio = outputAudioTrack !== null;
+        
+        // Audio verification: if input had audio but output doesn't, throw error
+        if (hasInputAudio && !hasOutputAudio) {
+          console.error('❌ AUDIO VERIFICATION FAILED: Input has audio but output has no audio track!');
+          throw new Error('Audio track missing in output: input had audio but output does not contain audio');
+        }
 
         if (outputVideoTrack) {
           const actualTotalBitrateBps = this.inputDuration > 0
@@ -815,6 +843,38 @@ export class LowLevelWebCodecsConverter implements VideoConverter {
       } catch (analysisError) {
         console.warn('[Analysis] Could not analyze output:', analysisError);
       }
+
+      // Performance summary
+      const totalConversionTimeMs = Date.now() - startTimeMs;
+      const videoAddPercent = totalConversionTimeMs > 0 ? (totalVideoAddTimeMs / totalConversionTimeMs * 100).toFixed(1) : '0';
+      const sampleReadPercent = totalConversionTimeMs > 0 ? (totalSampleReadTimeMs / totalConversionTimeMs * 100).toFixed(1) : '0';
+      const finalizePercent = totalConversionTimeMs > 0 ? (finalizeTimeMs / totalConversionTimeMs * 100).toFixed(1) : '0';
+      
+      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      console.log('          PERFORMANCE METRICS');
+      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      console.log('[Timing]');
+      console.table({
+        'Total conversion (ms)': totalConversionTimeMs.toFixed(0),
+        'Video frames': videoFrameCount,
+        'Audio samples': audioSampleCount,
+      });
+      console.log('[Time Breakdown]');
+      console.table({
+        'Sample read (ms)': totalSampleReadTimeMs.toFixed(0) + ` (${sampleReadPercent}%)`,
+        'Video add (ms)': totalVideoAddTimeMs.toFixed(0) + ` (${videoAddPercent}%)`,
+        'Audio add (ms)': totalAudioAddTimeMs.toFixed(0),
+        'Finalize (ms)': finalizeTimeMs.toFixed(0) + ` (${finalizePercent}%)`,
+      });
+      // Identify bottleneck
+      if (parseFloat(videoAddPercent) > 60) {
+        console.log('⚠️ BOTTLENECK: VideoEncoderSource.add() is the main bottleneck');
+      } else if (parseFloat(sampleReadPercent) > 40) {
+        console.log('⚠️ BOTTLENECK: Sample reading/demuxing is the main bottleneck');
+      } else {
+        console.log('✅ No single bottleneck detected');
+      }
+      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 
       // Final summary
       console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
