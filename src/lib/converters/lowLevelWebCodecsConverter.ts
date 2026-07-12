@@ -123,6 +123,11 @@ export class LowLevelWebCodecsConverter implements VideoConverter {
   private processedSeconds: number = 0;
   private abortController: AbortController | null = null;
   
+  // Progress tracking fields
+  private lastProgressReportAt: number = 0;
+  private lastProgressPercent: number = 0;
+  private progressReportIntervalMs: number = 150; // Report progress at most every 150ms
+  
   // Low-level components
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private input: any = null;
@@ -194,6 +199,8 @@ export class LowLevelWebCodecsConverter implements VideoConverter {
     this.inputDuration = 0;
     this.speedEMA = 0;
     this.processedSeconds = 0;
+    this.lastProgressReportAt = 0;
+    this.lastProgressPercent = 0;
   }
 
   private reportProgress(
@@ -201,9 +208,22 @@ export class LowLevelWebCodecsConverter implements VideoConverter {
     percent: number,
     onProgress?: (progress: { percent: number; time: number; stage: string; hasProgress?: boolean; encodedTime?: number | null; encodingSpeed?: number | null; totalDuration?: number | null }) => void
   ): void {
+    // Throttle progress reports to avoid excessive React re-renders
+    const now = performance.now();
+    const isFinalUpdate = percent >= 95 || percent === 100;
+    
+    if (!isFinalUpdate && now - this.lastProgressReportAt < this.progressReportIntervalMs) {
+      return; // Skip this report
+    }
+    
+    // Ensure progress is monotonically increasing
+    const monotonicPercent = Math.max(this.lastProgressPercent, percent);
+    this.lastProgressPercent = monotonicPercent;
+    this.lastProgressReportAt = now;
+    
     if (onProgress) {
       onProgress({
-        percent,
+        percent: monotonicPercent,
         time: this.processedSeconds,
         stage,
         hasProgress: true,
@@ -507,71 +527,174 @@ export class LowLevelWebCodecsConverter implements VideoConverter {
       await this.output.start();
       this.reportProgress('encoding', 10, onProgress);
 
-      // Step 7: Create sample sink to read from input
+      // Step 7: Create sample sinks to read from input
       const MediabunnyVideoSampleSink = Mediabunny.VideoSampleSink;
       const videoSink = new MediabunnyVideoSampleSink(this.videoTrack);
 
       // Step 8: Create audio sink if available
       let audioSink: InstanceType<typeof Mediabunny.AudioSampleSink> | null = null;
+      let hasAudioTrack = false;
       if (hasInputAudio && this.audioTrack) {
         audioSink = new Mediabunny.AudioSampleSink(this.audioTrack);
+        hasAudioTrack = true;
+        console.log('[Audio] Input has audio track, will interleave samples');
+      } else {
+        console.log('[Audio] No input audio track found');
       }
 
-      // Step 9: Process video samples
-      console.log('[Processing] Starting video encoding...');
+      // Step 9: Interleaved audio/video processing
+      // Note: Mediabunny VideoSample/AudioSample timestamp is in SECONDS
+      console.log('[Processing] Starting interleaved audio/video encoding...');
       let videoFrameCount = 0;
+      let audioSampleCount = 0;
       const startTimeMs = Date.now();
+      
+      // Track processed time based on sample timestamps
+      const updateProcessedSeconds = (sampleTimestamp: number, sampleDuration: number) => {
+        // Mediabunny timestamps are in SECONDS
+        const sampleEndSeconds = sampleTimestamp + (sampleDuration || 0);
+        this.processedSeconds = Math.max(this.processedSeconds, sampleEndSeconds);
+      };
+      
+      // Update progress based on media timestamp (not wall clock)
+      const updateProgress = () => {
+        const elapsedMs = Date.now() - startTimeMs;
+        const elapsedSec = elapsedMs / 1000;
+        
+        // Calculate encoding speed: processed media time / wall clock time
+        const instantSpeed = elapsedSec > 0
+          ? this.processedSeconds / elapsedSec
+          : 0;
+        
+        this.speedEMA = this.speedEMA === 0
+          ? instantSpeed
+          : SPEED_EMA_ALPHA * instantSpeed + (1 - SPEED_EMA_ALPHA) * this.speedEMA;
+        
+        // Calculate progress based on media timestamp ratio
+        const mediaRatio = this.inputDuration > 0
+          ? this.processedSeconds / this.inputDuration
+          : 0;
+        
+        // Progress: start at 10%, end at 90%
+        const encodingProgress = Math.min(
+          90,
+          Math.max(10, 10 + mediaRatio * 80)
+        );
+        
+        this.reportProgress('encoding', encodingProgress, onProgress);
+      };
 
-      for await (const sample of videoSink.samples()) {
+      // Process video samples
+      let nextVideoSample: IteratorResult<unknown> | null = null;
+      let nextAudioSample: IteratorResult<unknown> | null = null;
+      let videoIteratorDone = false;
+      let audioIteratorDone = true; // Start as done if no audio
+      
+      if (audioSink) {
+        audioIteratorDone = false;
+      }
+
+      // Helper to get next video sample
+      const getNextVideoSample = async () => {
+        if (videoIteratorDone) return null;
+        if (!nextVideoSample) {
+          // @ts-ignore - async iterator
+          nextVideoSample = await videoSink.samples().next();
+        }
+        if (nextVideoSample?.done) {
+          videoIteratorDone = true;
+          nextVideoSample = null;
+          return null;
+        }
+        const sample = nextVideoSample?.value;
+        nextVideoSample = null;
+        return sample;
+      };
+
+      // Helper to get next audio sample
+      const getNextAudioSample = async () => {
+        if (audioIteratorDone || !audioSink) return null;
+        if (!nextAudioSample) {
+          // @ts-ignore - async iterator
+          nextAudioSample = await audioSink.samples().next();
+        }
+        if (nextAudioSample?.done) {
+          audioIteratorDone = true;
+          nextAudioSample = null;
+          return null;
+        }
+        const sample = nextAudioSample?.value;
+        nextAudioSample = null;
+        return sample;
+      };
+
+      // Interleaved processing loop
+      while (true) {
         // Check abort
         if (signal?.aborted) {
           await this.cancelOutput();
           throw new Error('Conversion aborted');
         }
 
-        // Add to encoder source
-        await this.videoEncoderSource.add(sample);
+        // Get next samples if we don't have them
+        const videoSample = nextVideoSample?.value ?? await getNextVideoSample();
+        const audioSample = nextAudioSample?.value ?? await getNextAudioSample();
+        
+        // Reset the peek buffers
+        nextVideoSample = null;
+        nextAudioSample = null;
 
-        videoFrameCount++;
-
-        // Progress reporting
-        const elapsedMs = Date.now() - startTimeMs;
-        const elapsedSec = elapsedMs / 1000;
-        if (elapsedSec > 0 && this.inputDuration > 0) {
-          const instantSpeed = elapsedSec / this.inputDuration;
-          this.speedEMA = this.speedEMA === 0
-            ? instantSpeed
-            : SPEED_EMA_ALPHA * instantSpeed + (1 - SPEED_EMA_ALPHA) * this.speedEMA;
-          const progress = Math.min(90, Math.round(10 + (elapsedSec / this.inputDuration) * 80));
-          this.reportProgress('encoding', progress, onProgress);
+        // Check if both are done
+        if (!videoSample && !audioSample) {
+          break;
         }
 
-        // Release sample
-        sample.close();
+        // Determine which sample to process next based on timestamp
+        // Process the one with the smaller timestamp first
+        const videoTimestamp = videoSample ? ((videoSample as { timestamp: number }).timestamp ?? Infinity) : Infinity;
+        const audioTimestamp = audioSample ? ((audioSample as { timestamp: number }).timestamp ?? Infinity) : Infinity;
+
+        if (videoSample && videoTimestamp <= audioTimestamp) {
+          // Process video sample
+          // @ts-ignore - VideoSample
+          const vs = videoSample;
+          
+          // Update processed seconds from video sample timestamp
+          updateProcessedSeconds(vs.timestamp, vs.duration ?? (1 / detectedFrameRate));
+          updateProgress();
+          
+          await this.videoEncoderSource.add(vs);
+          videoFrameCount++;
+          vs.close();
+        } else if (audioSample) {
+          // Process audio sample
+          // @ts-ignore - AudioSample
+          const as = audioSample;
+          
+          // Update processed seconds from audio sample timestamp
+          updateProcessedSeconds(as.timestamp, as.duration ?? 0.02); // ~20ms default audio frame
+          
+          await this.audioEncoderSource.add(as);
+          audioSampleCount++;
+          as.close();
+        }
       }
+
+      // Update processedSeconds to exact input duration after all samples processed
+      this.processedSeconds = this.inputDuration;
+      updateProgress(); // Final progress update
 
       console.log(`[Processing] Encoded ${videoFrameCount} video frames in ${((Date.now() - startTimeMs) / 1000).toFixed(1)}s`);
-
-      // Step 10: Process audio samples if available
-      if (audioSink && this.audioEncoderSource) {
-        console.log('[Processing] Starting audio encoding...');
-        let audioSampleCount = 0;
-
-        for await (const sample of audioSink.samples()) {
-          if (signal?.aborted) {
-            await this.cancelOutput();
-            throw new Error('Conversion aborted');
-          }
-
-          await this.audioEncoderSource.add(sample);
-          audioSampleCount++;
-          sample.close();
-        }
-
-        console.log(`[Processing] Encoded ${audioSampleCount} audio samples`);
+      console.log(`[Processing] Encoded ${audioSampleCount} audio samples`);
+      
+      // Verify audio output
+      if (hasAudioTrack && this.outputAudioTrack) {
+        console.log('[Audio] Output audio track verified');
+      } else if (hasAudioTrack && !this.outputAudioTrack) {
+        console.warn('[Audio] WARNING: Input had audio but output audio track is null!');
       }
 
-      // Step 11: Finalize output
+      // Step 10: Finalize output
       this.reportProgress('finalizing', 95, onProgress);
       console.log('[Output] Finalizing...');
 

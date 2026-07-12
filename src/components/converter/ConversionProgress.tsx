@@ -173,7 +173,7 @@ export function ConversionProgress({ progress }: ConversionProgressProps) {
           Mobil cihazlarda bu işlem birkaç dakika sürebilir.
         </p>
         <p className="text-xs text-slate-400 text-center">
-          Video: H.264 • Ses: AAC
+          Video: H.264 • Ses: {progress.stage === 'complete' ? 'AAC' : 'işleniyor'}
         </p>
       </div>
     </div>

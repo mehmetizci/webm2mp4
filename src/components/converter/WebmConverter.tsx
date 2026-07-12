@@ -563,18 +563,11 @@ export function WebmConverter() {
             totalDuration: null,
           });
           
-          console.log('[Quality-DEBUG] ===== CONVERSION START =====');
-          console.log('[Quality-DEBUG] settings.quality:', settings.quality);
-          console.log('[Quality-DEBUG] settings:', JSON.stringify(settings));
-          
           const result = await converter.convert({
             file: selectedFile,
             quality: settings.quality,
             framerate: 30,
             onProgress: (progress: { percent: number; time: number; stage: string; hasProgress?: boolean; encodedTime?: number | null; encodingSpeed?: number | null; totalDuration?: number | null }) => {
-              console.log('[WebCodecs] Progress:', progress);
-              console.log('[Quality-DEBUG] Current settings.quality:', settings.quality);
-              
               // Update stage for all conversion stages
               if (progress.stage === 'reading' || progress.stage === 'analyzing' || 
                   progress.stage === 'initializing' || progress.stage === 'encoding' || 
@@ -583,18 +576,17 @@ export function WebmConverter() {
                 setStage(progress.stage as ConversionStage);
               }
               
-              // Update WebCodecs progress state - use stage from progress callback
+              // Update WebCodecs progress state - use actual encoded time from converter
               if (progress.percent !== undefined) {
-                const elapsed = (Date.now() - webCodecsStartTimeRef.current) / 1000;
                 setWebCodecsProgress(prev => ({
                   ...prev,
                   percent: progress.percent,
-                  time: elapsed,
+                  time: progress.encodedTime ?? prev.encodedTime ?? 0,
                   hasProgress: true,
                   encodedTime: progress.encodedTime ?? null,
                   encodingSpeed: progress.encodingSpeed ?? null,
                   stage: progress.stage as ConversionStage,
-                  // Don't overwrite totalDuration if already set
+                  totalDuration: prev.totalDuration ?? progress.totalDuration ?? null,
                 }));
               }
             },
@@ -687,7 +679,15 @@ export function WebmConverter() {
             engine: 'webcodecs' as const,
           };
           
-          // Force progress to 100 on completion
+          // Update WebCodecs progress state to complete
+          setWebCodecsProgress(prev => ({
+            ...prev,
+            percent: 100,
+            encodedTime: prev.totalDuration ?? result.duration,
+            totalDuration: prev.totalDuration ?? result.duration,
+            encodingSpeed: result.averageSpeed ?? prev.encodingSpeed,
+            stage: 'complete',
+          }));
           
           setResult(convertResult);
           setStage('complete');
