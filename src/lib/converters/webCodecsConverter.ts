@@ -349,7 +349,8 @@ export class WebCodecsConverter implements VideoConverter {
         
         const outputFormat = await analysisInput.getFormat();
         const videoTrack = await analysisInput.getPrimaryVideoTrack();
-        const audioTrack = await analysisInput.getAudioTrack().catch(() => null);
+        const audioTracks = await analysisInput.getAudioTracks().catch(() => []);
+        const audioTrack = audioTracks[0] ?? null;
         
         if (videoTrack) {
           const trackInfo = await videoTrack.getTrackInfo();
