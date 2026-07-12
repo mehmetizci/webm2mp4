@@ -622,41 +622,44 @@ export function WebmConverter() {
           // Get encoder debug info from converter
           const encoderDebugInfo = webCodecsConverter.getDebugInfo();
           
-          // Calculate bitrates from actual output (or from output analysis if available)
+          // Calculate bitrates - all in bps
           const videoDuration = result.duration;
-          const actualVideoBitrate = result.outputAnalysis?.averageVideoBitrate 
-            ? (result.outputAnalysis.averageVideoBitrate / 1000) 
-            : (videoDuration > 0 ? (result.fileSize * 8 / videoDuration / 1000) : null);
-          const audioBitrate = result.outputAnalysis?.averageAudioBitrate 
-            ? (result.outputAnalysis.averageAudioBitrate / 1000) 
-            : (result.hasAudio ? (result.audioBitrate ?? 128) : 0);
-          const totalBitrate = actualVideoBitrate !== null ? actualVideoBitrate + audioBitrate : null;
           
-          // Update debug info with encoder configuration
+          // Total bitrate from file size and duration (in bps)
+          const totalBitrateBps = videoDuration > 0 
+            ? Math.round((result.fileSize * 8) / videoDuration)
+            : null;
+          
+          // Video bitrate (in bps) - from output analysis or calculated
+          const videoBitrateBps = result.outputAnalysis?.averageVideoBitrate 
+            ?? (totalBitrateBps !== null ? totalBitrateBps - 128_000 : null); // Subtract audio bitrate
+          
+          // Audio bitrate (in bps)
+          const audioBitrateBps = result.hasAudio ? 128_000 : 0;
+          
+          // Update debug info with encoder configuration (values in bps)
           updateDebugInfo({
             lastProgressValue: 100,
             webCodecsEncoderConfig: encoderDebugInfo.encoderConfig ? {
               codec: encoderDebugInfo.encoderConfig.codec,
-              targetBitrate: encoderDebugInfo.encoderConfig.bitrate,
+              targetBitrate: encoderDebugInfo.encoderConfig.bitrate, // Already in bps
               framerate: encoderDebugInfo.encoderConfig.framerate,
               bitrateMode: encoderDebugInfo.encoderConfig.bitrateMode,
               latencyMode: encoderDebugInfo.encoderConfig.latencyMode,
               hardwareAcceleration: encoderDebugInfo.encoderConfig.hardwareAcceleration,
               keyFrameInterval: encoderDebugInfo.encoderConfig.keyFrameInterval,
             } : null,
-            webCodecsActualBitrate: result.outputAnalysis?.averageVideoBitrate 
-              ? result.outputAnalysis.averageVideoBitrate 
-              : (actualVideoBitrate !== null ? actualVideoBitrate * 1000 : null),
+            webCodecsActualBitrate: videoBitrateBps, // In bps
             webCodecsBitrateDifference: result.outputAnalysis?.bitrateDifference ?? null,
             webCodecsOutputWidth: encoderDebugInfo.outputWidth || null,
             webCodecsOutputHeight: encoderDebugInfo.outputHeight || null,
             webCodecsQualityPreset: encoderDebugInfo.qualityPreset || 'standard',
-            videoBitrate: actualVideoBitrate !== null ? actualVideoBitrate * 1000 : null,
-            audioBitrate: audioBitrate * 1000,
-            totalBitrate: totalBitrate !== null ? totalBitrate * 1000 : null,
+            videoBitrate: videoBitrateBps, // In bps
+            audioBitrate: audioBitrateBps, // In bps
+            totalBitrate: totalBitrateBps, // In bps
           });
           
-          // Convert to our result format
+          // Convert to our result format (values in bps)
           const convertResult = {
             blob: result.blob,
             fileName: result.filename,
@@ -666,9 +669,9 @@ export function WebmConverter() {
             inputSize: result.inputSize,
             outputSize: result.fileSize,
             compressionRatio: result.compressionRatio,
-            videoBitrate: actualVideoBitrate !== null ? actualVideoBitrate * 1000 : undefined,
-            audioBitrate: result.hasAudio ? audioBitrate * 1000 : 0,
-            totalBitrate: totalBitrate !== null ? totalBitrate * 1000 : undefined,
+            videoBitrate: videoBitrateBps ?? undefined, // In bps
+            audioBitrate: result.hasAudio ? audioBitrateBps : 0, // In bps
+            totalBitrate: totalBitrateBps ?? undefined, // In bps
             encodeTime: result.encodeTime,
             averageSpeed: result.averageSpeed ?? undefined,
             hasAudio: result.hasAudio,

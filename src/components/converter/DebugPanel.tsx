@@ -4,6 +4,7 @@ import { ChevronDown, ChevronUp, Bug, AlertTriangle, CheckCircle, XCircle, Info,
 import { useState } from 'react';
 import type { ConversionDebugInfo, DebugLogEntry } from '@/hooks/useDebugLog';
 import type { WebCodecsDetectionState, ConversionEngine } from '@/lib/converters/types';
+import { formatBitrate } from '@/lib/formatBitrate';
 
 interface DebugPanelProps {
   debugInfo: ConversionDebugInfo;
@@ -390,13 +391,13 @@ export function DebugPanel({ debugInfo, isVisible, webCodecsDetection, selectedE
               <DebugRow 
                 label="Hedef Bitrate" 
                 value={debugInfo.webCodecsEncoderConfig.targetBitrate 
-                  ? `${(debugInfo.webCodecsEncoderConfig.targetBitrate / 1000).toFixed(0)} kbps` 
+                  ? formatBitrate(debugInfo.webCodecsEncoderConfig.targetBitrate) 
                   : '-'} 
               />
               {debugInfo.webCodecsActualBitrate && (
                 <DebugRow 
                   label="Gerçek Bitrate" 
-                  value={`${(debugInfo.webCodecsActualBitrate / 1000).toFixed(0)} kbps`} 
+                  value={formatBitrate(debugInfo.webCodecsActualBitrate)} 
                   status="completed"
                 />
               )}
@@ -561,20 +562,20 @@ export function DebugPanel({ debugInfo, isVisible, webCodecsDetection, selectedE
             </DebugSection>
           )}
 
-          {/* Bitrate Stats */}
+          {/* Bitrate Stats - All values in bps */}
           {debugInfo.totalBitrate !== null && (
             <DebugSection title="Bitrate Bilgileri">
               <DebugRow 
                 label="Video Bitrate" 
-                value={debugInfo.videoBitrate !== null ? `${debugInfo.videoBitrate.toFixed(0)} kbps` : null} 
+                value={debugInfo.videoBitrate !== null ? formatBitrate(debugInfo.videoBitrate) : null} 
               />
               <DebugRow 
                 label="Ses Bitrate" 
-                value={debugInfo.audioBitrate !== null ? `${debugInfo.audioBitrate} kbps` : null} 
+                value={debugInfo.audioBitrate !== null ? formatBitrate(debugInfo.audioBitrate) : null} 
               />
               <DebugRow 
                 label="Toplam Bitrate" 
-                value={debugInfo.totalBitrate !== null ? `${debugInfo.totalBitrate.toFixed(0)} kbps` : null} 
+                value={debugInfo.totalBitrate !== null ? formatBitrate(debugInfo.totalBitrate) : null} 
               />
             </DebugSection>
           )}

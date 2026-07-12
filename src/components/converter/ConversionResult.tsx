@@ -3,6 +3,7 @@
 import { CheckCircle, Download, RefreshCw, Film, ArrowDownCircle, Clock, Gauge, Zap, Globe, Volume, VolumeX } from 'lucide-react';
 import type { ConversionResult as ResultType } from '@/types/converter';
 import { downloadBlob } from '@/lib/file-utils';
+import { formatBitrate } from '@/lib/formatBitrate';
 
 interface ConversionResultProps {
   result: ResultType;
@@ -130,25 +131,25 @@ export function ConversionResult({ result, onReset }: ConversionResultProps) {
             </div>
           </div>
           
-          {/* Bitrate Stats */}
+          {/* Bitrate Stats - All values are in bps */}
           {(result.totalBitrate || result.videoBitrate) && (
             <div className="pt-2 border-t border-slate-100 text-xs text-slate-500 space-y-1">
               {result.videoBitrate && (
                 <div className="flex justify-between">
                   <span>Video Bitrate</span>
-                  <span className="font-mono text-slate-700">{Math.round(result.videoBitrate)} kbps</span>
+                  <span className="font-mono text-slate-700">{formatBitrate(result.videoBitrate)}</span>
                 </div>
               )}
               {result.audioBitrate !== undefined && result.audioBitrate > 0 && (
                 <div className="flex justify-between">
                   <span>Ses Bitrate</span>
-                  <span className="font-mono text-slate-700">{result.audioBitrate} kbps</span>
+                  <span className="font-mono text-slate-700">{formatBitrate(result.audioBitrate)}</span>
                 </div>
               )}
               {result.totalBitrate && (
                 <div className="flex justify-between">
                   <span>Toplam Bitrate</span>
-                  <span className="font-mono text-slate-700">{Math.round(result.totalBitrate)} kbps</span>
+                  <span className="font-mono text-slate-700">{formatBitrate(result.totalBitrate)}</span>
                 </div>
               )}
             </div>

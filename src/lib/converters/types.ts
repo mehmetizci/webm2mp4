@@ -89,13 +89,14 @@ export interface OutputAnalysis {
   height: number;
   frameRate: number;
   duration: number;
-  averageVideoBitrate: number;
-  averageAudioBitrate: number | null;
+  averageVideoBitrate: number; // In bps
+  averageAudioBitrate: number | null; // In bps
   container: string;
   fileSizeBytes: number;
   // Target values for comparison
-  targetBitrate?: number;
-  bitrateDifference?: number;
+  targetBitrate?: number; // In bps
+  bitrateDifference?: number; // Percentage
+  totalBitrateBps?: number; // Total bitrate in bps
 }
 
 export interface ConverterSupport {

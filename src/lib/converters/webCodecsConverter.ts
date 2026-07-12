@@ -379,13 +379,18 @@ export class WebCodecsConverter implements VideoConverter {
         if (videoTrack) {
           // Get actual video bitrate from output file size and duration
           // (Mediabunny InputVideoTrack doesn't have getTrackInfo method)
-          const actualVideoBitrate = this.inputDuration > 0
+          // Calculate total bitrate from file size and duration (in bps)
+          const totalBitrateBps = this.inputDuration > 0
             ? Math.round((outputBuffer.byteLength * 8) / this.inputDuration)
             : this.debugInfo.targetBitrate;
           
-          // Calculate bitrate difference percentage
+          // Audio bitrate is 128 kbps = 128000 bps
+          const AUDIO_BITRATE_BPS = 128_000;
+          const actualVideoBitrateBps = totalBitrateBps - (audioTrack ? AUDIO_BITRATE_BPS : 0);
+          
+          // Calculate bitrate difference percentage (using target in bps)
           const bitrateDifference = this.debugInfo.targetBitrate > 0
-            ? ((actualVideoBitrate - this.debugInfo.targetBitrate) / this.debugInfo.targetBitrate * 100)
+            ? ((actualVideoBitrateBps - this.debugInfo.targetBitrate) / this.debugInfo.targetBitrate * 100)
             : 0;
           
           outputAnalysis = {
@@ -395,16 +400,17 @@ export class WebCodecsConverter implements VideoConverter {
             height: this.debugInfo.outputHeight,
             frameRate: frameRate,
             duration: this.inputDuration,
-            averageVideoBitrate: actualVideoBitrate,
-            averageAudioBitrate: audioTrack ? 128_000 : null,
+            averageVideoBitrate: actualVideoBitrateBps, // In bps
+            averageAudioBitrate: audioTrack ? AUDIO_BITRATE_BPS : null, // In bps
             container: 'MP4',
             fileSizeBytes: outputBuffer.byteLength,
-            targetBitrate: this.debugInfo.targetBitrate,
+            targetBitrate: this.debugInfo.targetBitrate, // In bps
             bitrateDifference: bitrateDifference,
+            totalBitrateBps: totalBitrateBps, // Total bitrate in bps
           };
           
-          // Update debug info with actual bitrate
-          this.debugInfo.actualBitrate = actualVideoBitrate;
+          // Update debug info with actual bitrate (in bps)
+          this.debugInfo.actualBitrate = actualVideoBitrateBps;
           this.debugInfo.bitrateDifference = bitrateDifference;
           
           // Enhanced output analysis logging
