@@ -491,8 +491,9 @@ export function DebugPanel({ debugInfo, isVisible, webCodecsDetection, selectedE
                 value={debugInfo.webCodecsPerformanceMetrics.conversionCompleted ? 'Tamamlandı' : 'Yarım kaldı'} 
                 status={debugInfo.webCodecsPerformanceMetrics.conversionCompleted ? 'completed' : 'warning'}
               />
+              {/* Phase timing */}
               <DebugRow 
-                label="Metadata Hazırlama" 
+                label="Metadata Okuma" 
                 value={formatMs(debugInfo.webCodecsPerformanceMetrics.metadataMs)} 
                 status={debugInfo.webCodecsPerformanceMetrics.metadataMs !== null ? 'completed' : 'idle'}
               />
@@ -507,35 +508,56 @@ export function DebugPanel({ debugInfo, isVisible, webCodecsDetection, selectedE
                 status={debugInfo.webCodecsPerformanceMetrics.trackDetectionMs !== null ? 'completed' : 'idle'}
               />
               <DebugRow 
-                label="Decoder Destek Testi" 
+                label="Decoder Test" 
                 value={formatMs(debugInfo.webCodecsPerformanceMetrics.decoderSupportTestMs)} 
                 status={debugInfo.webCodecsPerformanceMetrics.decoderSupportTestMs !== null ? 'completed' : 'idle'}
               />
+              {/* Video processing */}
               <DebugRow 
                 label="Video Sample Okuma" 
                 value={formatMs(debugInfo.webCodecsPerformanceMetrics.videoSampleReadMs)} 
                 status={debugInfo.webCodecsPerformanceMetrics.videoSampleReadMs !== null ? 'completed' : 'idle'}
               />
               <DebugRow 
-                label="Video Frame İşleme" 
-                value={formatMs(debugInfo.webCodecsPerformanceMetrics.videoFrameSubmitMs)} 
-                status={debugInfo.webCodecsPerformanceMetrics.videoFrameSubmitMs !== null ? 'completed' : 'idle'}
+                label="Video Pipeline Add" 
+                value={formatMs(debugInfo.webCodecsPerformanceMetrics.videoPipelineAddMs)} 
+                status={debugInfo.webCodecsPerformanceMetrics.videoPipelineAddMs !== null ? 'completed' : 'idle'}
               />
               <DebugRow 
-                label="Video Frame Sayısı" 
+                label="Frame Sayısı" 
                 value={debugInfo.webCodecsPerformanceMetrics.videoFrameCount?.toString() ?? 'Tamamlanmadı'} 
               />
-              {debugInfo.webCodecsPerformanceMetrics.videoFrameCount && debugInfo.webCodecsPerformanceMetrics.videoFrameCount > 0 && (
-                <DebugRow 
-                  label="Ortalama Frame İşleme" 
-                  value={formatMs(debugInfo.webCodecsPerformanceMetrics.averageVideoFrameMs)} 
-                />
-              )}
               <DebugRow 
-                label="İlk Frame Hazırlama" 
+                label="İlk Frame" 
                 value={formatMs(debugInfo.webCodecsPerformanceMetrics.firstVideoFrameMs)} 
                 status={debugInfo.webCodecsPerformanceMetrics.firstVideoFrameMs !== null ? 'completed' : 'idle'}
               />
+              {/* Frame statistics */}
+              {debugInfo.webCodecsPerformanceMetrics.videoFrameCount && debugInfo.webCodecsPerformanceMetrics.videoFrameCount > 0 && (
+                <>
+                  <DebugRow 
+                    label="Ortalama Frame" 
+                    value={formatMs(debugInfo.webCodecsPerformanceMetrics.videoPipelineAddAvgMs)} 
+                  />
+                  <DebugRow 
+                    label="P50 Frame" 
+                    value={formatMs(debugInfo.webCodecsPerformanceMetrics.videoPipelineAddP50Ms)} 
+                  />
+                  <DebugRow 
+                    label="P95 Frame" 
+                    value={formatMs(debugInfo.webCodecsPerformanceMetrics.videoPipelineAddP95Ms)} 
+                  />
+                  <DebugRow 
+                    label="En Yavaş Frame" 
+                    value={formatMs(debugInfo.webCodecsPerformanceMetrics.videoPipelineAddMaxMs)} 
+                  />
+                  <DebugRow 
+                    label="50ms Üzeri Frame" 
+                    value={debugInfo.webCodecsPerformanceMetrics.videoPipelineAddSlowCount?.toString() ?? '-'} 
+                  />
+                </>
+              )}
+              {/* Audio */}
               {debugInfo.webCodecsPerformanceMetrics.audioSampleReadMs !== null ? (
                 <>
                   <DebugRow 
@@ -550,17 +572,13 @@ export function DebugPanel({ debugInfo, isVisible, webCodecsDetection, selectedE
               ) : (
                 <>
                   <DebugRow 
-                    label="Audio Sample Okuma" 
-                    value="Uygulanmadı" 
-                    status="idle"
-                  />
-                  <DebugRow 
-                    label="Audio Frame İşleme" 
+                    label="Audio" 
                     value="Uygulanmadı" 
                     status="idle"
                   />
                 </>
               )}
+              {/* Post-processing */}
               <DebugRow 
                 label="Encoder Flush" 
                 value={formatMs(debugInfo.webCodecsPerformanceMetrics.encoderFlushMs)} 
@@ -576,8 +594,9 @@ export function DebugPanel({ debugInfo, isVisible, webCodecsDetection, selectedE
                 value={formatMs(debugInfo.webCodecsPerformanceMetrics.blobCreationMs)} 
                 status={debugInfo.webCodecsPerformanceMetrics.blobCreationMs !== null ? 'completed' : 'idle'}
               />
+              {/* Totals */}
               <DebugRow 
-                label="Core Dönüşüm Süresi" 
+                label="Core Süre" 
                 value={formatMs(debugInfo.webCodecsPerformanceMetrics.conversionCoreMs)} 
                 status={debugInfo.webCodecsPerformanceMetrics.conversionCoreMs !== null ? 'completed' : 'idle'}
               />

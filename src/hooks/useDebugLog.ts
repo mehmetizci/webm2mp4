@@ -105,23 +105,39 @@ export interface ConversionDebugInfo {
   webCodecsPipeline: 'Low Level' | 'Standard' | null;
   // WebCodecs performance metrics
   webCodecsPerformanceMetrics: {
+    // Phase timing
     metadataMs: number | null;
     inputOpenMs: number | null;
     trackDetectionMs: number | null;
     decoderSupportTestMs: number | null;
-    videoSampleReadMs: number | null;
-    videoFrameSubmitMs: number | null;
+    
+    // Video processing timing
+    videoSampleReadMs: number | null;      // Demux/sample iterator time
+    videoPipelineAddMs: number | null;   // Total time in videoEncoderSource.add() including backpressure
+    videoPipelineAddMinMs: number | null;  // Min frame time
+    videoPipelineAddAvgMs: number | null;   // Average frame time
+    videoPipelineAddP50Ms: number | null;  // Median frame time
+    videoPipelineAddP95Ms: number | null;  // 95th percentile frame time
+    videoPipelineAddMaxMs: number | null;   // Max frame time
+    videoPipelineAddSlowCount: number | null; // Frames above slow threshold (>50ms)
     videoFrameCount: number | null;
+    firstVideoFrameMs: number | null;
+    
+    // Audio processing timing
     audioSampleReadMs: number | null;
     audioFrameSubmitMs: number | null;
     audioFrameCount: number | null;
+    
+    // Post-processing
     encoderFlushMs: number | null;
     muxFinalizeMs: number | null;
     blobCreationMs: number | null;
+    
+    // Totals
     conversionCoreMs: number | null;
     totalConversionMs: number | null;
-    firstVideoFrameMs: number | null;
-    averageVideoFrameMs: number | null;
+    
+    // Derived
     effectiveSpeed: number | null;
     conversionCompleted: boolean;
   } | null;

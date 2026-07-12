@@ -65,6 +65,9 @@ const DEFAULT_FRAMERATE = 30;
 // Speed EMA smoothing factor
 const SPEED_EMA_ALPHA = 0.3;
 
+// Slow frame threshold in milliseconds (frames above this are considered slow)
+const SLOW_FRAME_THRESHOLD_MS = 50;
+
 // Instance ID counter for debugging
 let instanceCounter = 0;
 
@@ -80,6 +83,84 @@ async function calculateSha256(blob: Blob): Promise<string> {
   const hashBuffer = await crypto.subtle.digest('SHA-256', buffer);
   const hashArray = Array.from(new Uint8Array(hashBuffer));
   return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+// Sanitize duration values - return null for invalid values
+function sanitizeDuration(value: number): number | null {
+  if (Number.isFinite(value) && value >= 0) {
+    return value;
+  }
+  return null;
+}
+
+// Online statistics for frame timing (Welford's algorithm for numerical stability)
+class OnlineStats {
+  private count = 0;
+  private mean = 0;
+  private m2 = 0; // Sum of squared differences from mean
+  private min = Infinity;
+  private max = -Infinity;
+  private samples: number[] = []; // Keep last N samples for approximate percentiles
+  private readonly maxSamples = 100; // Keep last 100 samples for p95 approximation
+
+  add(value: number): void {
+    this.count++;
+    const delta = value - this.mean;
+    this.mean += delta / this.count;
+    const delta2 = value - this.mean;
+    this.m2 += delta * delta2;
+    
+    if (value < this.min) this.min = value;
+    if (value > this.max) this.max = value;
+    
+    // Reservoir sampling for percentile approximation
+    if (this.samples.length < this.maxSamples) {
+      this.samples.push(value);
+    } else {
+      // Replace random sample with diminishing probability
+      const j = Math.floor(Math.random() * this.count);
+      if (j < this.maxSamples) {
+        this.samples[j] = value;
+      }
+    }
+  }
+
+  getCount(): number {
+    return this.count;
+  }
+
+  getMean(): number | null {
+    return this.count > 0 ? this.mean : null;
+  }
+
+  getMin(): number | null {
+    return this.count > 0 ? this.min : null;
+  }
+
+  getMax(): number | null {
+    return this.count > 0 ? this.max : null;
+  }
+
+  getStdDev(): number | null {
+    if (this.count < 2) return null;
+    return Math.sqrt(this.m2 / (this.count - 1));
+  }
+
+  // Approximate percentile using sorted samples
+  getPercentile(p: number): number | null {
+    if (this.samples.length === 0) return null;
+    const sorted = [...this.samples].sort((a, b) => a - b);
+    const index = Math.ceil((p / 100) * sorted.length) - 1;
+    return sorted[Math.max(0, index)];
+  }
+
+  getP95(): number | null {
+    return this.getPercentile(95);
+  }
+
+  getP50(): number | null {
+    return this.getPercentile(50);
+  }
 }
 
 export interface LowLevelWebCodecsProgress {
@@ -137,31 +218,47 @@ export interface LowLevelDebugInfo {
   error: string | null;
   // Performance metrics
   performanceMetrics: {
+    // Phase timing (sequential operations)
     metadataMs: number | null;
     inputOpenMs: number | null;
     trackDetectionMs: number | null;
     decoderSupportTestMs: number | null;
-    videoSampleReadMs: number | null;
-    videoFrameSubmitMs: number | null;
+    
+    // Video processing timing
+    videoSampleReadMs: number | null;      // Demux/sample iterator time
+    videoPipelineAddMs: number | null;     // Total time in videoEncoderSource.add() including backpressure
+    videoPipelineAddMinMs: number | null;  // Min frame time
+    videoPipelineAddAvgMs: number | null;   // Average frame time
+    videoPipelineAddP50Ms: number | null;  // Median frame time
+    videoPipelineAddP95Ms: number | null;  // 95th percentile frame time
+    videoPipelineAddMaxMs: number | null;   // Max frame time
+    videoPipelineAddSlowCount: number | null; // Frames above slow threshold (>50ms)
     videoFrameCount: number | null;
+    firstVideoFrameMs: number | null;
+    
+    // Audio processing timing
     audioSampleReadMs: number | null;
     audioFrameSubmitMs: number | null;
     audioFrameCount: number | null;
+    
+    // Post-processing
     encoderFlushMs: number | null;
     muxFinalizeMs: number | null;
     blobCreationMs: number | null;
-    conversionCoreMs: number | null;
-    totalConversionMs: number | null;
-    firstVideoFrameMs: number | null;
-    averageVideoFrameMs: number | null;
-    effectiveSpeed: number | null;
+    
+    // Totals
+    conversionCoreMs: number | null;   // Processing loop time (sample read + encode)
+    totalConversionMs: number | null;  // Full conversion from start to end
+    
+    // Derived metrics
+    effectiveSpeed: number | null;     // Video duration / conversion time
     conversionCompleted: boolean;
   };
 }
 
 export class LowLevelWebCodecsConverter implements VideoConverter {
   private debugInfo: LowLevelDebugInfo;
-  private startTime: number = 0;
+  private conversionStartTime: number = 0; // Using performance.now() for accurate duration measurement
   private inputDuration: number = 0;
   private speedEMA: number = 0;
   private processedSeconds: number = 0;
@@ -223,23 +320,39 @@ export class LowLevelWebCodecsConverter implements VideoConverter {
       error: null,
       // Performance metrics
       performanceMetrics: {
+        // Phase timing
         metadataMs: null,
         inputOpenMs: null,
         trackDetectionMs: null,
         decoderSupportTestMs: null,
+        
+        // Video processing
         videoSampleReadMs: null,
-        videoFrameSubmitMs: null,
+        videoPipelineAddMs: null,
+        videoPipelineAddMinMs: null,
+        videoPipelineAddAvgMs: null,
+        videoPipelineAddP50Ms: null,
+        videoPipelineAddP95Ms: null,
+        videoPipelineAddMaxMs: null,
+        videoPipelineAddSlowCount: null,
         videoFrameCount: null,
+        firstVideoFrameMs: null,
+        
+        // Audio processing
         audioSampleReadMs: null,
         audioFrameSubmitMs: null,
         audioFrameCount: null,
+        
+        // Post-processing
         encoderFlushMs: null,
         muxFinalizeMs: null,
         blobCreationMs: null,
+        
+        // Totals
         conversionCoreMs: null,
         totalConversionMs: null,
-        firstVideoFrameMs: null,
-        averageVideoFrameMs: null,
+        
+        // Derived
         effectiveSpeed: null,
         conversionCompleted: false,
       },
@@ -375,7 +488,7 @@ export class LowLevelWebCodecsConverter implements VideoConverter {
   // Reset state for new conversion (called before new conversion starts)
   private resetState(): void {
     this.debugInfo = this.createInitialDebugInfo();
-    this.startTime = 0;
+    this.conversionStartTime = 0;
     this.inputDuration = 0;
     this.speedEMA = 0;
     this.processedSeconds = 0;
@@ -432,7 +545,7 @@ export class LowLevelWebCodecsConverter implements VideoConverter {
 
     // Reset state for new conversion
     this.resetState();
-    this.startTime = Date.now();
+    this.conversionStartTime = performance.now(); // Use performance.now() for accurate timing
 
     const conversionId = generateId('conv');
     this.debugInfo.conversionId = conversionId;
@@ -475,6 +588,8 @@ export class LowLevelWebCodecsConverter implements VideoConverter {
     let videoSampleReadMs = 0;
     let audioSampleReadMs = 0;
     let firstVideoFrameMs: number | null = null;
+    let slowFrameCount = 0;
+    const frameStats = new OnlineStats(); // Online statistics for frame timing
 
     try {
       // Step 1: Create Mediabunny Input
@@ -991,7 +1106,7 @@ export class LowLevelWebCodecsConverter implements VideoConverter {
           // Process video sample
           if (currentVideoSample) {
             try {
-              // Track first video frame time
+              // Track first video frame time (time from processing start to first add() call)
               if (firstVideoFrameMs === null && videoFrameCount === 0) {
                 firstVideoFrameMs = performance.now() - processingStartTimeMs;
               }
@@ -1000,10 +1115,17 @@ export class LowLevelWebCodecsConverter implements VideoConverter {
               updateProcessedSeconds(currentVideoSample.timestamp, currentVideoSample.duration ?? (1 / detectedFrameRate));
               updateProgress();
               
-              // Measure video add time
+              // Measure video pipeline add time (includes decode, transform, encode, backpressure)
               const videoAddStart = performance.now();
               await this.videoEncoderSource.add(currentVideoSample);
-              totalVideoAddTimeMs += performance.now() - videoAddStart;
+              const singleFrameMs = performance.now() - videoAddStart;
+              totalVideoAddTimeMs += singleFrameMs;
+              
+              // Track frame statistics
+              frameStats.add(singleFrameMs);
+              if (singleFrameMs > SLOW_FRAME_THRESHOLD_MS) {
+                slowFrameCount++;
+              }
               
               videoFrameCount++;
             } finally {
@@ -1198,34 +1320,50 @@ export class LowLevelWebCodecsConverter implements VideoConverter {
       const flushPercent = totalConversionTimeMs > 0 ? (encoderFlushMs / totalConversionTimeMs * 100).toFixed(1) : '0';
       const muxPercent = totalConversionTimeMs > 0 ? (muxFinalizeMs / totalConversionTimeMs * 100).toFixed(1) : '0';
       
-      // Calculate average frame processing time
-      const averageVideoFrameMs = videoFrameCount > 0 ? totalVideoAddTimeMs / videoFrameCount : null;
+      // Calculate total conversion time (from start to end, using same time source)
+      const totalConversionMs = sanitizeDuration(performance.now() - this.conversionStartTime);
       
       // Calculate effective speed
-      const effectiveSpeed = this.inputDuration > 0 && totalConversionTimeMs > 0
+      const effectiveSpeed = this.inputDuration > 0 && totalConversionTimeMs !== null && totalConversionTimeMs > 0
         ? this.inputDuration / (totalConversionTimeMs / 1000)
         : null;
       
       // Store performance metrics in debugInfo
       this.debugInfo.performanceMetrics = {
-        metadataMs: this.debugInfo.performanceMetrics.metadataMs,
-        inputOpenMs: this.debugInfo.performanceMetrics.inputOpenMs,
-        trackDetectionMs: this.debugInfo.performanceMetrics.trackDetectionMs,
-        decoderSupportTestMs: this.debugInfo.performanceMetrics.decoderSupportTestMs,
-        videoSampleReadMs: videoSampleReadMs,
-        videoFrameSubmitMs: totalVideoAddTimeMs,
+        // Phase timing
+        metadataMs: sanitizeDuration(this.debugInfo.performanceMetrics.metadataMs),
+        inputOpenMs: sanitizeDuration(this.debugInfo.performanceMetrics.inputOpenMs),
+        trackDetectionMs: sanitizeDuration(this.debugInfo.performanceMetrics.trackDetectionMs),
+        decoderSupportTestMs: sanitizeDuration(this.debugInfo.performanceMetrics.decoderSupportTestMs),
+        
+        // Video processing
+        videoSampleReadMs: sanitizeDuration(videoSampleReadMs),
+        videoPipelineAddMs: sanitizeDuration(totalVideoAddTimeMs),
+        videoPipelineAddMinMs: frameStats.getMin(),
+        videoPipelineAddAvgMs: frameStats.getMean(),
+        videoPipelineAddP50Ms: frameStats.getP50(),
+        videoPipelineAddP95Ms: frameStats.getP95(),
+        videoPipelineAddMaxMs: frameStats.getMax(),
+        videoPipelineAddSlowCount: slowFrameCount,
         videoFrameCount: videoFrameCount,
-        audioSampleReadMs: hasInputAudio ? audioSampleReadMs : null,
-        audioFrameSubmitMs: hasInputAudio ? totalAudioAddTimeMs : null,
+        firstVideoFrameMs: firstVideoFrameMs !== null ? sanitizeDuration(firstVideoFrameMs) : null,
+        
+        // Audio processing
+        audioSampleReadMs: hasInputAudio ? sanitizeDuration(audioSampleReadMs) : null,
+        audioFrameSubmitMs: hasInputAudio ? sanitizeDuration(totalAudioAddTimeMs) : null,
         audioFrameCount: hasInputAudio ? audioSampleCount : null,
-        encoderFlushMs: encoderFlushMs,
-        muxFinalizeMs: muxFinalizeMs,
-        blobCreationMs: blobCreationMs,
-        conversionCoreMs: totalConversionTimeMs,
-        totalConversionMs: performance.now() - this.startTime,
-        firstVideoFrameMs: firstVideoFrameMs,
-        averageVideoFrameMs: averageVideoFrameMs,
-        effectiveSpeed: effectiveSpeed,
+        
+        // Post-processing
+        encoderFlushMs: sanitizeDuration(encoderFlushMs),
+        muxFinalizeMs: sanitizeDuration(muxFinalizeMs),
+        blobCreationMs: sanitizeDuration(blobCreationMs),
+        
+        // Totals
+        conversionCoreMs: sanitizeDuration(totalConversionTimeMs),
+        totalConversionMs: totalConversionMs,
+        
+        // Derived
+        effectiveSpeed: effectiveSpeed !== null ? sanitizeDuration(effectiveSpeed) : null,
         conversionCompleted: true,
       };
       
@@ -1237,19 +1375,28 @@ export class LowLevelWebCodecsConverter implements VideoConverter {
         'Total conversion (ms)': totalConversionTimeMs.toFixed(0),
         'Video frames': videoFrameCount,
         'Audio samples': audioSampleCount,
+        'Slow frames (>50ms)': slowFrameCount,
       });
       console.log('[Time Breakdown]');
       console.table({
-        'Sample read (ms)': totalSampleReadTimeMs.toFixed(0) + ` (${sampleReadPercent}%)`,
-        'Video frame submit (ms)': totalVideoAddTimeMs.toFixed(0) + ` (${videoAddPercent}%)`,
-        'Audio frame submit (ms)': totalAudioAddTimeMs.toFixed(0),
+        'Video Sample Read (ms)': totalSampleReadTimeMs.toFixed(0) + ` (${sampleReadPercent}%)`,
+        'Video Pipeline Add (ms)': totalVideoAddTimeMs.toFixed(0) + ` (${videoAddPercent}%)`,
         'Encoder flush (ms)': encoderFlushMs.toFixed(0) + ` (${flushPercent}%)`,
         'Mux/finalize (ms)': muxFinalizeMs.toFixed(0) + ` (${muxPercent}%)`,
         'Blob creation (ms)': blobCreationMs.toFixed(0),
       });
+      console.log('[Frame Statistics]');
+      console.table({
+        'Min frame (ms)': frameStats.getMin()?.toFixed(2) ?? '-',
+        'Avg frame (ms)': frameStats.getMean()?.toFixed(2) ?? '-',
+        'P50 frame (ms)': frameStats.getP50()?.toFixed(2) ?? '-',
+        'P95 frame (ms)': frameStats.getP95()?.toFixed(2) ?? '-',
+        'Max frame (ms)': frameStats.getMax()?.toFixed(2) ?? '-',
+      });
       // Identify bottleneck
       if (parseFloat(videoAddPercent) > 60) {
-        console.log('⚠️ BOTTLENECK: VideoEncoderSource.add() is the main bottleneck');
+        console.log('⚠️ BOTTLENECK: videoEncoderSource.add() is the main bottleneck (~' + videoAddPercent + '%)');
+        console.log('   Note: add() includes decode + transform + encode + backpressure waiting');
       } else if (parseFloat(sampleReadPercent) > 40) {
         console.log('⚠️ BOTTLENECK: Sample reading/demuxing is the main bottleneck');
       } else {
@@ -1286,7 +1433,7 @@ export class LowLevelWebCodecsConverter implements VideoConverter {
         `[Performance] Metadata: ${formatMs(this.debugInfo.performanceMetrics.metadataMs ?? 0)} | ` +
         `Input: ${formatMs(this.debugInfo.performanceMetrics.inputOpenMs ?? 0)} | ` +
         `Video Read: ${formatMs(videoSampleReadMs)} | ` +
-        `Frame Submit: ${formatMs(totalVideoAddTimeMs)} | ` +
+        `Pipeline Add: ${formatMs(totalVideoAddTimeMs)} | ` +
         `Flush: ${formatMs(encoderFlushMs)} | ` +
         `Mux: ${formatMs(muxFinalizeMs)} | ` +
         `Total: ${formatMs(totalConversionTimeMs)} | ` +
@@ -1294,7 +1441,9 @@ export class LowLevelWebCodecsConverter implements VideoConverter {
       );
 
       // Calculate stats
-      const encodeTime = (Date.now() - this.startTime) / 1000;
+      const encodeTime = totalConversionMs !== null && totalConversionMs > 0 
+        ? totalConversionMs / 1000 
+        : 0; // Default to 0 if something goes wrong
       const compressionRatio = this.inputDuration > 0 && file.size > 0
         ? Math.round(((file.size - outputBuffer.byteLength) / file.size) * 100)
         : 0;
@@ -1328,24 +1477,42 @@ export class LowLevelWebCodecsConverter implements VideoConverter {
       
       // Store partial performance metrics on error
       const partialConversionTimeMs = processingStartTimeMs > 0 ? performance.now() - processingStartTimeMs : null;
+      const totalTimeMs = this.conversionStartTime > 0 ? sanitizeDuration(performance.now() - this.conversionStartTime) : null;
+      
       this.debugInfo.performanceMetrics = {
-        metadataMs: this.debugInfo.performanceMetrics.metadataMs,
-        inputOpenMs: this.debugInfo.performanceMetrics.inputOpenMs,
-        trackDetectionMs: this.debugInfo.performanceMetrics.trackDetectionMs,
-        decoderSupportTestMs: this.debugInfo.performanceMetrics.decoderSupportTestMs,
-        videoSampleReadMs: videoSampleReadMs,
-        videoFrameSubmitMs: totalVideoAddTimeMs,
+        // Phase timing
+        metadataMs: this.debugInfo.performanceMetrics.metadataMs ?? null,
+        inputOpenMs: this.debugInfo.performanceMetrics.inputOpenMs ?? null,
+        trackDetectionMs: this.debugInfo.performanceMetrics.trackDetectionMs ?? null,
+        decoderSupportTestMs: this.debugInfo.performanceMetrics.decoderSupportTestMs ?? null,
+        
+        // Video processing
+        videoSampleReadMs: sanitizeDuration(videoSampleReadMs),
+        videoPipelineAddMs: sanitizeDuration(totalVideoAddTimeMs),
+        videoPipelineAddMinMs: frameStats.getMin(),
+        videoPipelineAddAvgMs: frameStats.getMean(),
+        videoPipelineAddP50Ms: frameStats.getP50(),
+        videoPipelineAddP95Ms: frameStats.getP95(),
+        videoPipelineAddMaxMs: frameStats.getMax(),
+        videoPipelineAddSlowCount: slowFrameCount,
         videoFrameCount: videoFrameCount,
-        audioSampleReadMs: hasInputAudio ? audioSampleReadMs : null,
-        audioFrameSubmitMs: hasInputAudio ? totalAudioAddTimeMs : null,
+        firstVideoFrameMs: firstVideoFrameMs !== null ? sanitizeDuration(firstVideoFrameMs) : null,
+        
+        // Audio processing
+        audioSampleReadMs: hasInputAudio ? sanitizeDuration(audioSampleReadMs) : null,
+        audioFrameSubmitMs: hasInputAudio ? sanitizeDuration(totalAudioAddTimeMs) : null,
         audioFrameCount: hasInputAudio ? audioSampleCount : null,
+        
+        // Post-processing
         encoderFlushMs: null,
         muxFinalizeMs: null,
         blobCreationMs: null,
-        conversionCoreMs: partialConversionTimeMs,
-        totalConversionMs: partialConversionTimeMs,
-        firstVideoFrameMs: firstVideoFrameMs,
-        averageVideoFrameMs: videoFrameCount > 0 ? totalVideoAddTimeMs / videoFrameCount : null,
+        
+        // Totals
+        conversionCoreMs: partialConversionTimeMs !== null ? sanitizeDuration(partialConversionTimeMs) : null,
+        totalConversionMs: totalTimeMs,
+        
+        // Derived
         effectiveSpeed: null,
         conversionCompleted: false,
       };
