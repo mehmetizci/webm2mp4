@@ -23,15 +23,11 @@ import {
 } from 'mediabunny';
 
 // Constants
-const DEFAULT_WIDTH = 1280;
-const DEFAULT_HEIGHT = 720;
 const DEFAULT_VIDEO_BITRATE = 2_000_000;
 const DEFAULT_FRAMERATE = 30;
 const SPEED_EMA_ALPHA = 0.3; // EMA smoothing factor
 
 export interface WebCodecsConverterOptions {
-  width?: number;
-  height?: number;
   videoBitrate?: number;
   framerate?: number;
   preferHardware?: boolean;
@@ -100,8 +96,6 @@ export class WebCodecsConverter implements VideoConverter {
 
     const {
       file,
-      width = DEFAULT_WIDTH,
-      height = DEFAULT_HEIGHT,
       bitrate = DEFAULT_VIDEO_BITRATE,
       framerate: frameRate = DEFAULT_FRAMERATE,
       onProgress,
@@ -164,8 +158,8 @@ export class WebCodecsConverter implements VideoConverter {
         input,
         output,
         video: {
-          width: Math.min(width, DEFAULT_WIDTH),
-          height: Math.min(height, DEFAULT_HEIGHT),
+          // Use source resolution automatically (no width/height to preserve aspect ratio)
+          // This prevents the "fit" parameter requirement and works correctly for vertical videos
           frameRate,
           codec: 'avc', // H.264
           bitrate: QUALITY_HIGH,
