@@ -56,7 +56,7 @@ export interface ConversionDebugInfo {
   // Total video duration
   totalDuration: number | null;
   // Metadata source (how duration was obtained)
-  metadataSource: 'html5' | 'ffmpeg_fallback' | null;
+  metadataSource: 'html5' | 'mediabunny' | 'ffmpeg_fallback' | null;
   // Output read status
   outputReadStatus: 'idle' | 'reading' | 'read' | 'error';
   // Compression stats
