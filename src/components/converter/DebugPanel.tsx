@@ -483,6 +483,28 @@ export function DebugPanel({ debugInfo, isVisible, webCodecsDetection, selectedE
             </DebugSection>
           )}
 
+          {/* Encoder Optimization Results - WebCodecs only */}
+          {actualEngine === 'webcodecs' && debugInfo.webCodecsOptimizationResults && (
+            <DebugSection title="Encoder Optimizasyonu">
+              <DebugRow 
+                label="Seçilen Profil" 
+                value={debugInfo.webCodecsOptimizationResults.selectedProfile} 
+              />
+              <DebugRow 
+                label="Seçilen HW Modu" 
+                value={debugInfo.webCodecsOptimizationResults.selectedHardwareMode} 
+              />
+              <DebugRow 
+                label="Seçilen Bitrate" 
+                value={debugInfo.webCodecsOptimizationResults.selectedBitrateMode} 
+              />
+              <DebugRow 
+                label="Test Edilen" 
+                value={debugInfo.webCodecsOptimizationResults.testedConfigs.length.toString()} 
+              />
+            </DebugSection>
+          )}
+
           {/* Performance Profile - WebCodecs only */}
           {actualEngine === 'webcodecs' && debugInfo.webCodecsPerformanceMetrics && (
             <DebugSection title="Performans Profili">

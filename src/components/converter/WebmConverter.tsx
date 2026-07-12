@@ -697,6 +697,7 @@ export function WebmConverter() {
             webCodecsBitrateModeRequested: encoderDebugInfo.bitrateModeRequested ?? 'constant',
             webCodecsConversionId: encoderDebugInfo.conversionId,
             webCodecsPipeline: 'Low Level',
+            webCodecsOptimizationResults: encoderDebugInfo.optimizationResults ?? null,
             // WebCodecs performance metrics
             webCodecsPerformanceMetrics: encoderDebugInfo.performanceMetrics,
             videoBitrate: videoBitrateBps,

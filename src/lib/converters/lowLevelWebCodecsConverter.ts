@@ -28,7 +28,7 @@ import type {
 } from 'mediabunny';
 import type { VideoConverter, ConvertOptions, ConversionResult, ConverterSupport } from './types';
 import type { OutputAnalysis, ConversionErrorCode } from './types';
-import { checkWebCodecsSupport } from './webCodecsSupport';
+import { checkWebCodecsSupport, findBestEncoderConfig } from './webCodecsSupport';
 
 // Iterator result types for async generators
 type VideoIteratorResult = IteratorResult<VideoSample, void>;
@@ -207,6 +207,14 @@ export interface LowLevelDebugInfo {
     bitrateMode: string;
     latencyMode: string;
   } | null;
+  // Optimization results
+  optimizationResults: {
+    selectedCodec: string;
+    selectedProfile: string;
+    selectedHardwareMode: 'prefer-hardware' | 'no-preference';
+    selectedBitrateMode: 'constant' | 'variable';
+    testedConfigs: string[];  // List of tested config descriptions
+  } | null;
   encoderSupported: boolean;
   bitrateModeRequested: string;
   bitrateModeSupported: boolean;
@@ -309,6 +317,7 @@ export class LowLevelWebCodecsConverter implements VideoConverter {
       hardwareMode: 'no-preference',
       qualityPreset: 'standard',
       encoderConfig: null,
+      optimizationResults: null,
       encoderSupported: false,
       bitrateModeRequested: 'constant',
       bitrateModeSupported: false,
@@ -751,8 +760,52 @@ export class LowLevelWebCodecsConverter implements VideoConverter {
       // Use encoder config bitrate or override for extreme testing
       const targetVideoBitrateBps = targetBitrateBps ?? encoderConfig.encoder.bitrate;
 
-      // Create VideoEncoderConfig with constant bitrate mode
-      const bitrateMode: 'constant' | 'variable' = 'constant';
+      // Find the best encoder config for this resolution/bitrate
+      console.log('[Optimizer] Finding optimal encoder config...');
+      
+      // findBestEncoderConfig tests all profiles in priority order and returns the first working one
+      const bestConfig = await findBestEncoderConfig(
+        outputWidth,
+        outputHeight,
+        detectedFrameRate,
+        targetVideoBitrateBps,
+        false // Don't prefer variable bitrate for now
+      );
+
+      // Determine profile name from codec
+      const profileName = bestConfig.codec === 'avc1.42E01e' ? 'Baseline'
+        : bestConfig.codec === 'avc1.4D401f' ? 'Main'
+        : 'High';
+
+      const selectedConfig = {
+        codec: bestConfig.codec,
+        hardwareAcceleration: bestConfig.hardwareAcceleration,
+        bitrateMode: bestConfig.bitrateMode,
+      };
+
+      // Record tested configs (in order of priority)
+      const testedConfigs = [
+        'Baseline+prefer-hardware',
+        'Baseline+no-preference',
+        'Main+prefer-hardware',
+        'Main+no-preference',
+        'High+prefer-hardware',
+        'High+no-preference',
+      ];
+
+      // Store optimization results
+      this.debugInfo.optimizationResults = {
+        selectedCodec: selectedConfig.codec,
+        selectedProfile: profileName,
+        selectedHardwareMode: selectedConfig.hardwareAcceleration,
+        selectedBitrateMode: selectedConfig.bitrateMode,
+        testedConfigs,
+      };
+
+      console.log('[Optimizer] Selected config:', this.debugInfo.optimizationResults);
+
+      // Create VideoEncoderConfig with optimized settings
+      const bitrateMode = selectedConfig.bitrateMode;
       const latencyMode: 'quality' | 'realtime' = 'quality';
 
       const videoEncoderConfig: VideoEncodingConfig = {
@@ -760,7 +813,7 @@ export class LowLevelWebCodecsConverter implements VideoConverter {
         bitrate: targetVideoBitrateBps,
         bitrateMode,
         latencyMode,
-        hardwareAcceleration: hardwareMode,
+        hardwareAcceleration: selectedConfig.hardwareAcceleration,
         keyFrameInterval: 2,
         onEncoderConfig: (config) => {
           // Log the actual encoder config that was created
@@ -773,6 +826,7 @@ export class LowLevelWebCodecsConverter implements VideoConverter {
             bitrate: config.bitrate,
             latencyMode: config.latencyMode,
             bitrateMode: hasBitrateMode(config) ? config.bitrateMode : 'N/A',
+            hardwareAcceleration: (config as { hardwareAcceleration?: string }).hardwareAcceleration ?? 'N/A',
           });
           
           // Update encoder config with actual codec string from encoder
@@ -789,6 +843,9 @@ export class LowLevelWebCodecsConverter implements VideoConverter {
                 this.debugInfo.encoderConfig.codecProfile = 'Baseline';
               }
             }
+            // Update hardware acceleration in debug info
+            this.debugInfo.encoderConfig.hardwareAcceleration = 
+              (config as { hardwareAcceleration?: string }).hardwareAcceleration ?? 'unknown';
           }
           
           // Check if encoder returned bitrateMode - this indicates browser support

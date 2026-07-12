@@ -498,3 +498,173 @@ export function getFailureDescription(
 
   return descriptions[reason] || errorDetails || 'Bilinmeyen hata';
 }
+
+// ============================================================================
+// Encoder Config Optimization Utilities
+// ============================================================================
+
+export type H264Profile = 'Baseline' | 'Main' | 'High';
+
+export interface EncoderConfigTestResult {
+  codec: string;
+  hardwareAcceleration: 'prefer-hardware' | 'no-preference' | 'prefer-software';
+  supported: boolean;
+  actualHardwareAcceleration: string | null;
+}
+
+export interface BitrateModeTestResult {
+  mode: 'constant' | 'variable';
+  supported: boolean;
+}
+
+// Test a specific encoder config for compatibility
+export async function testEncoderConfig(
+  codec: string,
+  width: number,
+  height: number,
+  framerate: number,
+  bitrate: number,
+  hardwareAcceleration: 'prefer-hardware' | 'no-preference' | 'prefer-software'
+): Promise<EncoderConfigTestResult> {
+  if (!isBrowser() || typeof VideoEncoder === 'undefined') {
+    return { codec, hardwareAcceleration, supported: false, actualHardwareAcceleration: null };
+  }
+
+  try {
+    const config: VideoEncoderConfig = {
+      codec,
+      width,
+      height,
+      bitrate,
+      framerate,
+      hardwareAcceleration,
+    };
+
+    // Add profile for H.264 codecs
+    if (codec.startsWith('avc1.')) {
+      const profileMap: Record<string, string> = {
+        'avc1.64001f': 'high',
+        'avc1.4D401f': 'main',
+        'avc1.42E01e': 'baseline',
+      };
+      const profile = profileMap[codec] || 'high';
+      (config as VideoEncoderConfig & { avc?: { format: string; profile?: string } }).avc = {
+        format: 'avc',
+        profile,
+      };
+    }
+
+    const support = await VideoEncoder.isConfigSupported(config);
+    return {
+      codec,
+      hardwareAcceleration,
+      supported: Boolean(support.supported),
+      actualHardwareAcceleration: (support.config as VideoEncoderConfig)?.hardwareAcceleration ?? null,
+    };
+  } catch (error) {
+    logError('testEncoderConfig failed:', error);
+    return { codec, hardwareAcceleration, supported: false, actualHardwareAcceleration: null };
+  }
+}
+
+// Find the best encoder config for a given resolution/bitrate
+// Priority: Baseline(prefer-hardware) > Main(prefer-hardware) > High(prefer-hardware) > no-preference variants
+export async function findBestEncoderConfig(
+  width: number,
+  height: number,
+  framerate: number,
+  bitrate: number,
+  preferVariableBitrate: boolean = false
+): Promise<{
+  codec: string;
+  hardwareAcceleration: 'prefer-hardware' | 'no-preference';
+  bitrateMode: 'constant' | 'variable';
+}> {
+  // Profile priority: Baseline is usually fastest on mobile hardware
+  const profiles: { codec: string; profile: H264Profile }[] = [
+    { codec: 'avc1.42E01e', profile: 'Baseline' },
+    { codec: 'avc1.4D401f', profile: 'Main' },
+    { codec: 'avc1.64001f', profile: 'High' },
+  ];
+
+  // Hardware acceleration priority
+  const hwModes: ('prefer-hardware' | 'no-preference')[] = ['prefer-hardware', 'no-preference'];
+
+  // Test all combinations in priority order
+  for (const { codec } of profiles) {
+    for (const hwMode of hwModes) {
+      const result = await testEncoderConfig(codec, width, height, framerate, bitrate, hwMode);
+      if (result.supported) {
+        log(`Best config found: ${codec} + ${hwMode}`);
+        
+        // Now test bitrate mode
+        if (preferVariableBitrate) {
+          const varResult = await testBitrateMode(codec, width, height, framerate, bitrate, hwMode, 'variable');
+          if (varResult.supported) {
+            return { codec, hardwareAcceleration: hwMode, bitrateMode: 'variable' };
+          }
+        }
+        
+        return { codec, hardwareAcceleration: hwMode, bitrateMode: 'constant' };
+      }
+    }
+  }
+
+  // Fallback to default
+  log('No optimized config found, using defaults');
+  return {
+    codec: 'avc1.64001f',
+    hardwareAcceleration: 'no-preference',
+    bitrateMode: 'constant',
+  };
+}
+
+// Test bitrate mode support
+async function testBitrateMode(
+  codec: string,
+  width: number,
+  height: number,
+  framerate: number,
+  bitrate: number,
+  hardwareAcceleration: 'prefer-hardware' | 'no-preference',
+  bitrateMode: 'constant' | 'variable'
+): Promise<BitrateModeTestResult> {
+  if (!isBrowser() || typeof VideoEncoder === 'undefined') {
+    return { mode: bitrateMode, supported: false };
+  }
+
+  try {
+    const config: VideoEncoderConfig = {
+      codec,
+      width,
+      height,
+      bitrate,
+      framerate,
+      hardwareAcceleration,
+      bitrateMode,
+    };
+
+    // Add profile for H.264 codecs
+    if (codec.startsWith('avc1.')) {
+      const profileMap: Record<string, string> = {
+        'avc1.64001f': 'high',
+        'avc1.4D401f': 'main',
+        'avc1.42E01e': 'baseline',
+      };
+      const profile = profileMap[codec] || 'high';
+      (config as VideoEncoderConfig & { avc?: { format: string; profile?: string } }).avc = {
+        format: 'avc',
+        profile,
+      };
+    }
+
+    const support = await VideoEncoder.isConfigSupported(config);
+    return {
+      mode: bitrateMode,
+      supported: Boolean(support.supported),
+    };
+  } catch (error) {
+    logError('testBitrateMode failed:', error);
+    return { mode: bitrateMode, supported: false };
+  }
+}

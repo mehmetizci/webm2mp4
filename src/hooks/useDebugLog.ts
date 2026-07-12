@@ -103,6 +103,14 @@ export interface ConversionDebugInfo {
   webCodecsBitrateModeRequested: string | null;
   webCodecsConversionId: string | null;
   webCodecsPipeline: 'Low Level' | 'Standard' | null;
+  // Encoder optimization results
+  webCodecsOptimizationResults: {
+    selectedCodec: string;
+    selectedProfile: string;
+    selectedHardwareMode: 'prefer-hardware' | 'no-preference';
+    selectedBitrateMode: 'constant' | 'variable';
+    testedConfigs: string[];
+  } | null;
   // WebCodecs performance metrics
   webCodecsPerformanceMetrics: {
     // Phase timing
@@ -401,6 +409,7 @@ const initialDebugInfo: ConversionDebugInfo = {
   webCodecsBitrateModeRequested: null,
   webCodecsConversionId: null,
   webCodecsPipeline: null,
+  webCodecsOptimizationResults: null,
   // WebCodecs performance metrics
   webCodecsPerformanceMetrics: null,
   // Cleanup status
