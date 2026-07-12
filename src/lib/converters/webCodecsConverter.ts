@@ -20,6 +20,11 @@ import {
   canEncodeVideo,
   canEncodeAudio,
 } from 'mediabunny';
+import type {
+  ConversionOptions,
+  ConversionVideoOptions,
+  ConversionAudioOptions,
+} from 'mediabunny';
 import { 
   getEncoderConfigWithHardwareMode, 
   type HardwareMode,
@@ -27,6 +32,23 @@ import {
 } from './qualityConfig';
 import type { QualityPreset } from '@/types/converter';
 import type { OutputAnalysis } from './types';
+
+// Instance ID counter for debugging
+let instanceCounter = 0;
+
+// Generate unique ID
+function generateId(prefix: string): string {
+  instanceCounter++;
+  return `${prefix}-${Date.now()}-${instanceCounter}`;
+}
+
+// Calculate SHA-256 hash of blob
+async function calculateSha256(blob: Blob): Promise<string> {
+  const buffer = await blob.arrayBuffer();
+  const hashBuffer = await crypto.subtle.digest('SHA-256', buffer);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+}
 
 // Extended ConvertOptions with hardware mode override
 export interface ConvertOptionsWithHardware extends ConvertOptions {
@@ -211,9 +233,26 @@ export class WebCodecsConverter implements VideoConverter {
     }
 
     try {
+      // Generate unique instance IDs for this conversion
+      const conversionId = generateId('conv');
+      const inputId = generateId('input');
+      const outputId = generateId('output');
+      const bufferTargetId = generateId('buffer');
+      
+      console.log('[Instance IDs]');
+      console.table({
+        conversionId,
+        inputId,
+        outputId,
+        bufferTargetId,
+        quality,
+        hardwareMode,
+      });
+      
       // Step 1: Create Mediabunny Input from WebM file
-      const input = new (await import('mediabunny')).Input({
-        source: new (await import('mediabunny')).BlobSource(file),
+      const Mediabunny = await import('mediabunny');
+      const input = new Mediabunny.Input({
+        source: new Mediabunny.BlobSource(file),
         formats: [WEBM],
       });
       
@@ -349,7 +388,7 @@ export class WebCodecsConverter implements VideoConverter {
       // Step 3: Create Mediabunny Output for MP4
       this.reportProgress('initializing', 5, onProgress);
       const outputTarget = new BufferTarget();
-      const output = new (await import('mediabunny')).Output({
+      const output = new Mediabunny.Output({
         target: outputTarget,
         format: new Mp4OutputFormat(),
       });
@@ -357,8 +396,8 @@ export class WebCodecsConverter implements VideoConverter {
       // Step 4: Initialize conversion with Mediabunny Conversion API
       this.reportProgress('initializing', 8, onProgress);
       
-      // Build video options with forceTranscode to ensure bitrate settings are applied
-      const videoOptions: Record<string, unknown> = {
+      // Build video options with proper types - forceTranscode to ensure bitrate settings are applied
+      const videoOptions: ConversionVideoOptions = {
         codec: encoderConfig.encoder.codec,
         bitrate: encoderConfig.encoder.bitrate,
         frameRate: encoderConfig.encoder.framerate,
@@ -377,10 +416,20 @@ export class WebCodecsConverter implements VideoConverter {
         }
       }
       
-      // Log final video options before Conversion.init()
+      // Build audio options with proper types
+      const audioOptions: ConversionAudioOptions | undefined = audioCodecSupport ? {
+        codec: 'aac',
+        bitrate: AUDIO_BITRATE_BPS,
+        forceTranscode: true, // Force transcode for audio
+      } : undefined;
+      
+      // Log final video/audio options before Conversion.init()
       console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-      console.log('                 CONVERSION.INIT() OPTIONS                      ');
+      console.log(`          CONVERSION.INIT() FULL CONFIG [${conversionId}]`);
       console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      console.log('[tracks]');
+      console.log('  tracks: "primary"  ← Explicitly set');
+      console.log('[video]');
       console.table({
         codec: videoOptions.codec,
         bitrate: videoOptions.bitrate,
@@ -392,25 +441,48 @@ export class WebCodecsConverter implements VideoConverter {
         height: videoOptions.height ?? 'auto',
         fit: videoOptions.fit ?? 'none',
       });
+      console.log('[audio]');
+      console.log(audioOptions ? {
+        codec: audioOptions.codec,
+        bitrate: audioOptions.bitrate,
+        forceTranscode: audioOptions.forceTranscode,
+      } : 'audio: undefined (not supported)');
       
-      this.conversion = await Conversion.init({
+      // Build the full ConversionOptions object
+      const conversionOptions: ConversionOptions = {
         input,
         output,
+        tracks: 'primary', // Explicitly set to only use primary video and audio tracks
         video: videoOptions,
-        audio: audioCodecSupport ? {
-          codec: 'aac',
-        } : undefined,
-      });
+        audio: audioOptions,
+        showWarnings: true,
+      };
+      
+      // Log the actual object being passed to Conversion.init()
+      console.log('[ConversionOptions Object]');
+      console.log(JSON.stringify(conversionOptions, (key, value) => {
+        // Skip functions and circular references
+        if (typeof value === 'function') return '[Function]';
+        if (key === 'input' || key === 'output') return `[${key} instance]`;
+        return value;
+      }, 2));
+      
+      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      console.log('                 EXECUTING CONVERSION...');
+      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      
+      this.conversion = await Conversion.init(conversionOptions);
       
       this.debugInfo.conversionApiUsed = true;
       this.debugInfo.isValid = this.conversion.isValid;
       
       console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-      console.log('                 CONVERSION RESULT                            ');
+      console.log(`          CONVERSION INIT RESULT [${conversionId}]`);
       console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
       console.log('isValid:', this.conversion.isValid);
       console.log('utilizedTracks:', this.conversion.utilizedTracks.length);
       console.log('discardedTracks:', this.conversion.discardedTracks.length);
+      console.log('utilizedTracks:', this.conversion.utilizedTracks.map(t => `${t.type}:${t.codec}`).join(', '));
       
       if (!this.conversion.isValid) {
         console.warn('⚠️ Conversion is not valid! Discarded tracks:', this.conversion.discardedTracks);
@@ -451,11 +523,17 @@ export class WebCodecsConverter implements VideoConverter {
       
       // Step 7: Analyze output MP4 to get actual stats
       let outputAnalysis: OutputAnalysis | undefined;
+      let outputHash: string = '';
+      
       try {
-        const Mediabunny = await import('mediabunny');
-        const analysisInput = new Mediabunny.Input({
-          source: new Mediabunny.BlobSource(new Blob([outputBuffer], { type: 'video/mp4' })),
-          formats: [Mediabunny.MP4],
+        // Calculate SHA-256 hash of output
+        const outputBlob = new Blob([outputBuffer], { type: 'video/mp4' });
+        outputHash = await calculateSha256(outputBlob);
+        
+        const AnalysisMediabunny = await import('mediabunny');
+        const analysisInput = new AnalysisMediabunny.Input({
+          source: new AnalysisMediabunny.BlobSource(outputBlob),
+          formats: [AnalysisMediabunny.MP4],
         });
         
         const outputFormat = await analysisInput.getFormat();
@@ -502,25 +580,45 @@ export class WebCodecsConverter implements VideoConverter {
           this.debugInfo.actualAudioBitrateBps = actualAudioBitrateBps;
           this.debugInfo.bitrateDifferencePercent = bitrateDifferencePercent;
           
-          // Enhanced output analysis logging
+          // Comprehensive output analysis logging with SHA-256 hash
           console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-          console.log('                       OUTPUT ANALYSIS                            ');
+          console.log(`          OUTPUT ANALYSIS [${conversionId}]`);
           console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-          console.log(`Resolution:   ${outputAnalysis.width}x${outputAnalysis.height}`);
-          console.log(`Frame Rate:  ${outputAnalysis.frameRate} fps`);
-          console.log(`Duration:    ${outputAnalysis.duration.toFixed(1)}s`);
-          console.log(`File Size:   ${(outputAnalysis.fileSizeBytes / 1024 / 1024).toFixed(2)} MB`);
-          console.log(`Video Codec: ${outputAnalysis.videoCodec}`);
-          console.log(`Audio Codec: ${outputAnalysis.audioCodec ?? 'None'}`);
+          console.log('[Output File]');
+          console.table({
+            'File Size (MB)': (outputBuffer.byteLength / 1024 / 1024).toFixed(3),
+            'Duration (s)': this.inputDuration.toFixed(1),
+            'Resolution': `${outputAnalysis.width}x${outputAnalysis.height}`,
+            'Frame Rate': `${outputAnalysis.frameRate} fps`,
+            'Video Codec': outputAnalysis.videoCodec,
+            'Audio Codec': outputAnalysis.audioCodec ?? 'None',
+            'Container': outputAnalysis.container,
+          });
+          console.log('[SHA-256 Hash]');
+          console.log(outputHash.substring(0, 16) + '...' + outputHash.substring(48));
           console.log('────────────────────────────────────────────────────────────────');
-          console.log(`Target Video Bitrate:   ${(this.debugInfo.targetVideoBitrateBps / 1000).toFixed(0)} kbps`);
-          console.log(`Target Total Bitrate:   ${(this.debugInfo.targetTotalBitrateBps / 1000).toFixed(0)} kbps`);
-          console.log('────────────────────────────────────────────────────────────────');
-          console.log(`Actual Total Bitrate:   ${actualTotalBitrateBps ? (actualTotalBitrateBps / 1000).toFixed(0) : 'N/A'} kbps`);
-          console.log(`Actual Video Bitrate:   ${actualVideoBitrateBps ? (actualVideoBitrateBps / 1000).toFixed(0) : 'N/A'} kbps`);
-          console.log(`Actual Audio Bitrate:   ${actualAudioBitrateBps ? (actualAudioBitrateBps / 1000).toFixed(0) : 'N/A'} kbps`);
-          console.log('────────────────────────────────────────────────────────────────');
-          console.log(`Bitrate Difference:     ${bitrateDifferencePercent !== null ? (bitrateDifferencePercent > 0 ? '+' : '') + bitrateDifferencePercent.toFixed(1) + '%' : 'N/A'}`);
+          console.log('[Target Bitrates]');
+          console.table({
+            'Target Video (kbps)': (this.debugInfo.targetVideoBitrateBps / 1000).toFixed(0),
+            'Target Total (kbps)': (this.debugInfo.targetTotalBitrateBps / 1000).toFixed(0),
+            'Target Audio (kbps)': (AUDIO_BITRATE_BPS / 1000).toFixed(0),
+          });
+          console.log('[Actual Bitrates]');
+          console.table({
+            'Actual Video (kbps)': actualVideoBitrateBps ? (actualVideoBitrateBps / 1000).toFixed(0) : 'N/A',
+            'Actual Total (kbps)': actualTotalBitrateBps ? (actualTotalBitrateBps / 1000).toFixed(0) : 'N/A',
+            'Actual Audio (kbps)': actualAudioBitrateBps ? (actualAudioBitrateBps / 1000).toFixed(0) : 'N/A',
+          });
+          console.log('[Bitrate Comparison]');
+          const targetDiff = actualVideoBitrateBps !== null && this.debugInfo.targetVideoBitrateBps > 0
+            ? ((actualVideoBitrateBps / this.debugInfo.targetVideoBitrateBps - 1) * 100)
+            : null;
+          console.table({
+            'Difference (%)': bitrateDifferencePercent !== null ? bitrateDifferencePercent.toFixed(1) + '%' : 'N/A',
+            'Target/Actual Ratio': targetDiff !== null ? (1 + targetDiff / 100).toFixed(2) + 'x' : 'N/A',
+            'Quality Preset': quality,
+            'Hardware Mode': hardwareMode,
+          });
           console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
           
           // Quality separation verification
@@ -537,6 +635,22 @@ export class WebCodecsConverter implements VideoConverter {
       } catch (analysisError) {
         console.warn('[WebCodecs] Could not analyze output:', analysisError);
       }
+      
+      // Final summary log
+      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      console.log(`          CONVERSION COMPLETE [${conversionId}]`);
+      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      console.log('[Summary]');
+      console.table({
+        'Quality': quality,
+        'Hardware Mode': hardwareMode,
+        'Output Size (MB)': outputAnalysis ? (outputAnalysis.fileSizeBytes / 1024 / 1024).toFixed(3) : 'N/A',
+        'Target Video (kbps)': (this.debugInfo.targetVideoBitrateBps / 1000).toFixed(0),
+        'Actual Video (kbps)': this.debugInfo.actualVideoBitrateBps ? (this.debugInfo.actualVideoBitrateBps / 1000).toFixed(0) : 'N/A',
+        'Bitrate Diff (%)': this.debugInfo.bitrateDifferencePercent !== null ? this.debugInfo.bitrateDifferencePercent.toFixed(1) : 'N/A',
+        'SHA-256 (truncated)': outputHash ? outputHash.substring(0, 16) + '...' : 'N/A',
+      });
+      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
       
       // Calculate stats
       const encodeTime = (Date.now() - this.startTime) / 1000;
