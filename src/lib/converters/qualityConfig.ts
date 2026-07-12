@@ -3,13 +3,17 @@
 
 import type { QualityPreset } from '@/types/converter';
 
+// Hardware acceleration mode - separate from quality presets
+export type HardwareMode = 'no-preference' | 'prefer-hardware' | 'prefer-software';
+
+// Default hardware mode per Mediabunny documentation
+export const DEFAULT_HARDWARE_MODE: HardwareMode = 'no-preference';
+
 export interface EncoderConfig {
   bitrate: number;
   framerate: number;
   codec: 'avc';
-  bitrateMode: 'cbr' | 'vbr';
-  latencyMode: 'quality' | 'realtime';
-  hardwareAcceleration: 'no-preference' | 'prefer-hardware' | 'prefer-software';
+  hardwareAcceleration: HardwareMode;
   keyFrameInterval: number;
 }
 
@@ -84,12 +88,15 @@ function isVertical(width: number, height: number): boolean {
 
 /**
  * Get the encoder configuration based on quality preset and video dimensions
+ * Note: hardwareAcceleration is now separate - use getEncoderConfigWithHardwareMode()
+ * if you need to override the default hardware mode
  */
 export function getEncoderConfig(
   width: number,
   height: number,
   fps: number = 30,
-  quality: QualityPreset = 'standard'
+  quality: QualityPreset = 'standard',
+  hardwareMode: HardwareMode = DEFAULT_HARDWARE_MODE
 ): QualityConfig {
   const resolutionTier = getResolutionTier(width, height);
   const orientation = isVertical(width, height) ? 'vertical' : 'horizontal';
@@ -107,12 +114,24 @@ export function getEncoderConfig(
       bitrate,
       framerate: fps,
       codec: 'avc',
-      bitrateMode: 'vbr', // Variable bitrate for better quality/size ratio
-      latencyMode: 'quality', // Prioritize quality over encoding speed
-      hardwareAcceleration: 'prefer-hardware', // Use GPU when available
+      hardwareAcceleration: hardwareMode,
       keyFrameInterval: 2, // Keyframe every 2 seconds
     },
   };
+}
+
+/**
+ * Get encoder configuration with explicit hardware mode
+ * Use this when you need to test different hardware acceleration modes
+ */
+export function getEncoderConfigWithHardwareMode(
+  width: number,
+  height: number,
+  fps: number,
+  quality: QualityPreset,
+  hardwareMode: HardwareMode
+): QualityConfig {
+  return getEncoderConfig(width, height, fps, quality, hardwareMode);
 }
 
 /**

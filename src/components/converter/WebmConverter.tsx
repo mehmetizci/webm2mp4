@@ -642,18 +642,19 @@ export function WebmConverter() {
             lastProgressValue: 100,
             webCodecsEncoderConfig: encoderDebugInfo.encoderConfig ? {
               codec: encoderDebugInfo.encoderConfig.codec,
-              targetBitrate: encoderDebugInfo.encoderConfig.bitrate, // Already in bps
+              targetBitrate: encoderDebugInfo.encoderConfig.bitrate, // In bps
               framerate: encoderDebugInfo.encoderConfig.framerate,
-              bitrateMode: encoderDebugInfo.encoderConfig.bitrateMode,
-              latencyMode: encoderDebugInfo.encoderConfig.latencyMode,
               hardwareAcceleration: encoderDebugInfo.encoderConfig.hardwareAcceleration,
               keyFrameInterval: encoderDebugInfo.encoderConfig.keyFrameInterval,
+              forceTranscode: encoderDebugInfo.encoderConfig.forceTranscode,
             } : null,
             webCodecsActualBitrate: videoBitrateBps, // In bps
             webCodecsBitrateDifference: result.outputAnalysis?.bitrateDifference ?? null,
             webCodecsOutputWidth: encoderDebugInfo.outputWidth || null,
             webCodecsOutputHeight: encoderDebugInfo.outputHeight || null,
             webCodecsQualityPreset: encoderDebugInfo.qualityPreset || 'standard',
+            webCodecsHardwareMode: encoderDebugInfo.hardwareMode || 'no-preference',
+            webCodecsIsValid: encoderDebugInfo.isValid ?? false,
             videoBitrate: videoBitrateBps, // In bps
             audioBitrate: audioBitrateBps, // In bps
             totalBitrate: totalBitrateBps, // In bps

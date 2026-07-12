@@ -409,16 +409,16 @@ export function DebugPanel({ debugInfo, isVisible, webCodecsDetection, selectedE
                 />
               )}
               <DebugRow 
-                label="Bitrate Mode" 
-                value={debugInfo.webCodecsEncoderConfig.bitrateMode?.toUpperCase() || 'VBR'} 
+                label="Hardware Mode" 
+                value={debugInfo.webCodecsHardwareMode || 'no-preference'} 
               />
               <DebugRow 
-                label="Latency Mode" 
-                value={debugInfo.webCodecsEncoderConfig.latencyMode?.toUpperCase() || 'QUALITY'} 
+                label="Hardware Accel." 
+                value={debugInfo.webCodecsEncoderConfig.hardwareAcceleration || 'no-preference'} 
               />
               <DebugRow 
-                label="Hardware" 
-                value={debugInfo.webCodecsEncoderConfig.hardwareAcceleration || 'prefer-hardware'} 
+                label="Force Transcode" 
+                value={debugInfo.webCodecsEncoderConfig.forceTranscode ? 'Evet' : 'Hayır'} 
               />
             </DebugSection>
           )}
