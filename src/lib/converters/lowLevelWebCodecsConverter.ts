@@ -1530,7 +1530,21 @@ export class LowLevelWebCodecsConverter implements VideoConverter {
       return result;
 
     } catch (error) {
-      console.error('[Error]', error);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error('[Error]', errorMessage);
+      
+      // Check if this is an encoder configuration error
+      const isEncoderConfigError = 
+        errorMessage.includes('not supported') ||
+        errorMessage.includes('unsupported') ||
+        errorMessage.includes('encoder configuration') ||
+        errorMessage.includes('VideoEncoder') ||
+        errorMessage.includes('avc1') ||
+        errorMessage.includes('hardwareAcceleration');
+      
+      // Store error in debug info (for debug panel - NOT shown to user)
+      this.debugInfo.error = errorMessage;
+      this.debugInfo.isValid = false;
       
       // Store partial performance metrics on error
       const partialConversionTimeMs = processingStartTimeMs > 0 ? performance.now() - processingStartTimeMs : null;
@@ -1573,9 +1587,6 @@ export class LowLevelWebCodecsConverter implements VideoConverter {
         effectiveSpeed: null,
         conversionCompleted: false,
       };
-      
-      this.debugInfo.error = error instanceof Error ? error.message : String(error);
-      this.debugInfo.isValid = false;
 
       // Release runtime resources
       try {
@@ -1584,6 +1595,13 @@ export class LowLevelWebCodecsConverter implements VideoConverter {
         // Ignore cancel errors
       }
       this.releaseRuntimeResources();
+
+      // If this is an encoder configuration error, show a generic user-friendly message
+      // The specific error is logged for debugging but NOT shown to the user
+      if (isEncoderConfigError) {
+        console.error('[Encoder Config Error] Specific error (for debug only):', errorMessage);
+        throw new Error('Bu cihaz seçilen WebCodecs yapılandırmasını desteklemiyor. Uyumlu yapılandırma deneniyor...');
+      }
 
       // Re-throw with error code for better error classification
       if (error instanceof ConversionError) {
