@@ -24,10 +24,15 @@ export interface ConversionProgress {
 
 export interface ConvertOptions {
   file: File;
-  width: number;
-  height: number;
-  bitrate: number;
-  framerate: number;
+  // Resolution options - optional, uses source resolution if not provided
+  width?: number;
+  height?: number;
+  // Fit mode for Mediabunny - required when width and height are both provided
+  fit?: 'fill' | 'contain' | 'cover';
+  // Encoding options
+  bitrate?: number;
+  framerate?: number;
+  // Callbacks
   onProgress?: (progress: { percent: number; time: number; stage: string; hasProgress?: boolean; encodedTime?: number | null; encodingSpeed?: number | null; totalDuration?: number | null }) => void;
   signal?: AbortSignal;
 }
