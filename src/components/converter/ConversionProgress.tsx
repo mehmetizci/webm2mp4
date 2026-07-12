@@ -128,7 +128,7 @@ export function ConversionProgress({ progress }: ConversionProgressProps) {
             {Math.max(0, progress.percent).toFixed(0)}%
           </span>
           <span className="text-slate-500">
-            {formatTime(progress.time)}
+            Geçen: {formatTime(progress.time)}
           </span>
         </div>
         

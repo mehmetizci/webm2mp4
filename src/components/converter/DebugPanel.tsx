@@ -342,6 +342,18 @@ export function DebugPanel({ debugInfo, isVisible, webCodecsDetection, selectedE
                 value="Evet" 
                 status="completed"
               />
+              {debugInfo.totalDuration && (
+                <>
+                  <DebugRow 
+                    label="Video Süresi" 
+                    value={`${debugInfo.totalDuration.toFixed(1)}s`} 
+                  />
+                  <DebugRow 
+                    label="Metadata Kaynağı" 
+                    value={debugInfo.metadataSource || 'Mediabunny'} 
+                  />
+                </>
+              )}
               <DebugRow 
                 label="FFmpeg Yükleme" 
                 value="Uygulanmadı" 

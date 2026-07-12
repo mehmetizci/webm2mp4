@@ -37,7 +37,8 @@ export type ConversionStage =
   | 'loading'
   | 'reading'
   | 'analyzing'
-  | 'converting'
+  | 'initializing'
+  | 'encoding'
   | 'finalizing'
   | 'complete'
   | 'error';
@@ -102,9 +103,10 @@ export const QUALITY_PRESETS: Record<QualityPreset, { crf: number; maxrate: numb
 export const STAGE_LABELS: Record<ConversionStage, string> = {
   idle: '',
   loading: 'Dönüştürücü hazırlanıyor',
-  reading: 'Video dosyası analiz ediliyor',
+  reading: 'Dosya analiz ediliyor',
   analyzing: 'Video çözümleniyor',
-  converting: 'H.264 kodlanıyor',
+  initializing: 'WebCodecs hazırlanıyor',
+  encoding: 'Video dönüştürülüyor',
   finalizing: 'MP4 oluşturuluyor',
   complete: 'İşlem tamamlandı',
   error: 'Hata oluştu',

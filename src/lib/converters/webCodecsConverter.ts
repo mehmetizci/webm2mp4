@@ -99,6 +99,7 @@ export class WebCodecsConverter implements VideoConverter {
       bitrate = DEFAULT_VIDEO_BITRATE,
       framerate: frameRate = DEFAULT_FRAMERATE,
       onProgress,
+      onMetadata,
       signal,
     } = options;
 
@@ -114,7 +115,7 @@ export class WebCodecsConverter implements VideoConverter {
         formats: [WEBM],
       });
       
-      // Report reading stage with duration info
+      // Report reading stage
       this.reportProgress('reading', 0, onProgress);
       
       // Get input format info
@@ -123,35 +124,31 @@ export class WebCodecsConverter implements VideoConverter {
       console.log('[WebCodecs] Input format:', inputFormat);
       
       // Get video track info
-      const format = await input.getFormat();
       this.debugInfo.inputVideoCodec = 'VP8/VP9/AV1';
-      // WebM files typically have Opus audio - assume audio is present
-      // Actual audio encoding depends on canEncodeAudio check
       this.debugInfo.inputAudioCodec = 'Opus/Vorbis';
       
       // Get input duration from metadata FIRST - before any other processing
+      let inputDuration = 30;
+      let videoWidth = 0;
+      let videoHeight = 0;
+      let videoFrameRate = frameRate;
+      
       try {
         if (input.getDurationFromMetadata) {
           const duration = await input.getDurationFromMetadata();
-          this.inputDuration = typeof duration === 'number' && duration > 0 ? duration : 30;
-          console.log('[WebCodecs] Duration from metadata:', this.inputDuration);
+          inputDuration = typeof duration === 'number' && duration > 0 ? duration : 30;
+          console.log('[WebCodecs] Duration from metadata:', inputDuration);
         }
       } catch (e) {
         console.warn('[WebCodecs] Could not get duration from metadata:', e);
       }
       
+      this.inputDuration = inputDuration;
+      
       // Report analyzing stage WITH duration now available
       this.reportProgress('analyzing', 2, onProgress);
       
-      // Step 2: Create Mediabunny Output for MP4
-      const outputTarget = new BufferTarget();
-      const output = new (await import('mediabunny')).Output({
-        target: outputTarget,
-        format: new Mp4OutputFormat(),
-      });
-      
-      // Step 3: Check codec support
-      this.reportProgress('converting', 5, onProgress);
+      // Check codec support BEFORE reporting metadata
       const videoCodecSupport = await canEncodeVideo('avc');
       const audioCodecSupport = await canEncodeAudio('aac');
       
@@ -165,8 +162,31 @@ export class WebCodecsConverter implements VideoConverter {
       this.debugInfo.outputVideoCodec = 'H.264';
       this.debugInfo.outputAudioCodec = audioCodecSupport ? 'AAC' : 'None';
       
-      // Step 4: Initialize conversion with Mediabunny Conversion API
-      this.reportProgress('converting', 8, onProgress);
+      // Report metadata IMMEDIATELY - before any other processing
+      // This allows UI to show duration right away
+      if (onMetadata) {
+        onMetadata({
+          totalDurationSeconds: inputDuration,
+          width: videoWidth,
+          height: videoHeight,
+          frameRate: videoFrameRate,
+          hasAudio: audioCodecSupport, // Assume WebM has audio, AAC will be encoded if supported
+          videoCodec: 'VP8/VP9/AV1',
+          audioCodec: audioCodecSupport ? 'AAC' : null,
+        });
+        console.log('[WebCodecs] Metadata reported to UI');
+      }
+      
+      // Step 2: Create Mediabunny Output for MP4
+      this.reportProgress('initializing', 5, onProgress);
+      const outputTarget = new BufferTarget();
+      const output = new (await import('mediabunny')).Output({
+        target: outputTarget,
+        format: new Mp4OutputFormat(),
+      });
+      
+      // Step 3: Initialize conversion with Mediabunny Conversion API
+      this.reportProgress('initializing', 8, onProgress);
       
       this.conversion = await Conversion.init({
         input,
@@ -212,11 +232,11 @@ export class WebCodecsConverter implements VideoConverter {
         // Progress is 0-1, convert to percentage (10-99 range, reserving 100 for completion)
         const percent = Math.min(99, Math.round(10 + progress * 85));
         
-        this.reportProgress('converting', percent, onProgress);
+        this.reportProgress('encoding', percent, onProgress);
       };
       
       // Step 5: Execute conversion
-      this.reportProgress('converting', 10, onProgress);
+      this.reportProgress('encoding', 10, onProgress);
       await this.conversion.execute();
       
       // Step 6: Finalize

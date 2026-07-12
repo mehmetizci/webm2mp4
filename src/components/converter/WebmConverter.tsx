@@ -94,6 +94,25 @@ export function WebmConverter() {
   const [selectedEngine, setSelectedEngine] = useState<ConversionEngine | null>(null);
   const [actualEngine, setActualEngine] = useState<ConversionEngine | null>(null);
   
+  // WebCodecs-specific progress state
+  const [webCodecsProgress, setWebCodecsProgress] = useState<{
+    percent: number;
+    time: number;
+    stage: ConversionStage;
+    hasProgress: boolean;
+    encodedTime: number | null;
+    encodingSpeed: number | null;
+    totalDuration: number | null;
+  }>({
+    percent: 0,
+    time: 0,
+    stage: 'idle',
+    hasProgress: false,
+    encodedTime: null,
+    encodingSpeed: null,
+    totalDuration: null,
+  });
+  
   // Note: Render count tracking removed to prevent infinite loop
   // Use React DevTools or browser profiler for render debugging
 
@@ -102,6 +121,9 @@ export function WebmConverter() {
   
   // Object URL ref to manage download URLs properly
   const objectUrlRef = useRef<string | null>(null);
+  
+  // Start time ref for WebCodecs progress
+  const webCodecsStartTimeRef = useRef<number>(0);
 
   const { debugInfo, addLog, updateDebugInfo, resetDebugInfo, setFileInfo, startElapsedTimer, stopElapsedTimer } = useDebugLog();
 
@@ -404,7 +426,11 @@ export function WebmConverter() {
         addLog?.('info', 'System', 'Ekran uyanık tutuluyor');
         
         // Handle visibility change - re-acquire wake lock if page becomes visible again
+        // Only log once when manually released (not auto-release on page hide)
+        let wasManuallyReleased = false;
         wakeLockRef.current.addEventListener('release', () => {
+          // Only log if it wasn't our manual release
+          if (wasManuallyReleased) return;
           addLog?.('info', 'System', 'Wake Lock serbest bırakıldı');
         });
       } catch (err) {
@@ -413,16 +439,18 @@ export function WebmConverter() {
     }
   }, [addLog]);
 
+  // Idempotent wake lock release - prevents double release and double logging
   const releaseWakeLock = useCallback(async () => {
-    if (wakeLockRef.current) {
-      try {
-        await wakeLockRef.current.release();
-        wakeLockRef.current = null;
-        addLog?.('info', 'System', 'Wake Lock serbest bırakıldı');
-      } catch (err) {
-        console.warn('[WakeLock] Release failed:', err);
-        wakeLockRef.current = null;
-      }
+    const lock = wakeLockRef.current;
+    if (!lock) return; // Already released
+    
+    wakeLockRef.current = null; // Mark as released BEFORE actual release
+    
+    try {
+      await lock.release();
+      addLog?.('info', 'System', 'Wake Lock serbest bırakıldı');
+    } catch (err) {
+      console.warn('[WakeLock] Release failed:', err);
     }
   }, [addLog]);
 
@@ -526,17 +554,64 @@ export function WebmConverter() {
         const webCodecsConverter = getWebCodecsConverter();
         
         try {
+          // Initialize WebCodecs progress state
+          webCodecsStartTimeRef.current = Date.now();
+          setWebCodecsProgress({
+            percent: 0,
+            time: 0,
+            stage: 'idle',
+            hasProgress: false,
+            encodedTime: null,
+            encodingSpeed: null,
+            totalDuration: null,
+          });
+          
           const result = await webCodecsConverter.convert({
             file: selectedFile,
             bitrate: 2_000_000, // 2 Mbps
             framerate: 30,
             onProgress: (progress) => {
               console.log('[WebCodecs] Progress:', progress);
+              
+              // Update stage for all conversion stages
               if (progress.stage === 'reading' || progress.stage === 'analyzing' || 
-                  progress.stage === 'converting' || progress.stage === 'finalizing' ||
-                  progress.stage === 'complete') {
+                  progress.stage === 'initializing' || progress.stage === 'encoding' || 
+                  progress.stage === 'finalizing' || progress.stage === 'complete') {
                 setStage(progress.stage);
               }
+              
+              // Update WebCodecs progress state
+              if (progress.percent !== undefined) {
+                const elapsed = (Date.now() - webCodecsStartTimeRef.current) / 1000;
+                setWebCodecsProgress(prev => ({
+                  ...prev,
+                  percent: progress.percent,
+                  time: elapsed,
+                  hasProgress: true,
+                  encodedTime: progress.encodedTime ?? null,
+                  encodingSpeed: progress.encodingSpeed ?? null,
+                  // Don't overwrite totalDuration if already set
+                }));
+              }
+            },
+            onMetadata: (metadata) => {
+              console.log('[WebCodecs] Metadata received:', metadata);
+              
+              // Update WebCodecs progress with metadata
+              setWebCodecsProgress(prev => ({
+                ...prev,
+                totalDuration: metadata.totalDurationSeconds,
+                percent: 0,
+                time: 0,
+                hasProgress: true,
+                stage: 'analyzing',
+              }));
+              
+              // Also update debug info with total duration
+              updateDebugInfo({
+                totalDuration: metadata.totalDurationSeconds,
+                metadataSource: 'mediabunny',
+              });
             },
           });
           
@@ -798,7 +873,9 @@ export function WebmConverter() {
         )}
 
         {showProgress && (
-          <ConversionProgress progress={progress} />
+          <ConversionProgress 
+            progress={actualEngine === 'webcodecs' ? webCodecsProgress : progress} 
+          />
         )}
 
         {showResult && (

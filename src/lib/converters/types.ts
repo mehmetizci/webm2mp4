@@ -13,13 +13,35 @@ export type LegacyConversionStage =
   | 'muxing'
   | 'finalizing';
 
+// Extended stages for better UX
+export type ConversionStage =
+  | 'idle'
+  | 'loading'
+  | 'reading'
+  | 'analyzing'
+  | 'initializing'
+  | 'encoding'
+  | 'finalizing'
+  | 'complete'
+  | 'error';
+
+export interface VideoMetadata {
+  totalDurationSeconds: number;
+  width: number;
+  height: number;
+  frameRate: number;
+  hasAudio: boolean;
+  videoCodec: string;
+  audioCodec: string | null;
+}
+
 export interface ConversionProgress {
-  percent: number | null;
+  percent: number;
   encodedSeconds: number;
   totalSeconds: number | null;
   encodingSpeed: number | null;
   estimatedRemainingSeconds: number | null;
-  stage: 'idle' | 'loading' | 'reading' | 'analyzing' | 'converting' | 'finalizing' | 'complete' | 'error';
+  stage: ConversionStage;
 }
 
 export interface ConvertOptions {
@@ -34,6 +56,7 @@ export interface ConvertOptions {
   framerate?: number;
   // Callbacks
   onProgress?: (progress: { percent: number; time: number; stage: string; hasProgress?: boolean; encodedTime?: number | null; encodingSpeed?: number | null; totalDuration?: number | null }) => void;
+  onMetadata?: (metadata: VideoMetadata) => void;
   signal?: AbortSignal;
 }
 
