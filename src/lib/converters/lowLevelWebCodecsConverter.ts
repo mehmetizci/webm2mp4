@@ -2,7 +2,6 @@
 // Direct VideoEncoder control with constant bitrate mode for accurate quality control
 // Architecture: Mediabunny (demux/sink) → VideoSampleSource (custom encoder) → Output (mux)
 
-import type { QualityPreset } from '@/types/converter';
 import { getEncoderConfigWithHardwareMode, type HardwareMode } from './qualityConfig';
 import { getOutputFileName } from '@/lib/file-utils';
 
@@ -198,10 +197,19 @@ export class LowLevelWebCodecsConverter implements VideoConverter {
 
   // Validate that the device can decode the input video codec
   // This is critical for Android Chrome which may support H.264 encoding but not VP8/VP9/AV1 decoding
-  private async validateDecoderSupport(inputVideoCodec: string | null): Promise<void> {
+  private async validateDecoderSupport(inputVideoCodec: string | null): Promise<{
+    codecString: string;
+    status: 'supported' | 'unsupported' | 'untested' | 'error';
+  }> {
+    // Default response
+    const defaultResult = {
+      codecString: inputVideoCodec || 'unknown',
+      status: 'untested' as const,
+    };
+
     if (!inputVideoCodec) {
       console.warn('[Decoder] No input codec detected, skipping decoder validation');
-      return;
+      return defaultResult;
     }
 
     // Normalize codec string (e.g., "V_VP9" -> "vp09", "V_VP8" -> "vp8", "V_AV1" -> "av01")
@@ -209,7 +217,6 @@ export class LowLevelWebCodecsConverter implements VideoConverter {
     
     // Map to standard WebCodecs codec strings
     let webCodecsCodec: string;
-    let profile: string | undefined;
     
     switch (normalizedCodec) {
       case 'vp8':
@@ -227,7 +234,6 @@ export class LowLevelWebCodecsConverter implements VideoConverter {
       case 'h264':
       case 'avc1':
         webCodecsCodec = 'avc1.42E01e'; // H.264 Baseline
-        profile = 'baseline';
         break;
       default:
         // Try to use as-is (might work for some codecs)
@@ -241,7 +247,10 @@ export class LowLevelWebCodecsConverter implements VideoConverter {
     if (typeof VideoDecoder === 'undefined') {
       console.warn('[Decoder] VideoDecoder API not available');
       // Let it fail naturally when Mediabunny tries to use it
-      return;
+      return {
+        codecString: webCodecsCodec,
+        status: 'untested',
+      };
     }
 
     try {
@@ -252,7 +261,7 @@ export class LowLevelWebCodecsConverter implements VideoConverter {
       };
 
       // For H.264, we need to specify profile
-      if (profile && webCodecsCodec.startsWith('avc1')) {
+      if (webCodecsCodec.startsWith('avc1')) {
         (config as VideoDecoderConfig & { description?: Uint8Array }).description = new Uint8Array([
           0x01, // profile
           0x42, // baseline
@@ -272,6 +281,11 @@ export class LowLevelWebCodecsConverter implements VideoConverter {
 
       console.log(`[Decoder] ✅ SUPPORTED: ${webCodecsCodec}`);
       
+      return {
+        codecString: webCodecsCodec,
+        status: 'supported',
+      };
+      
     } catch (error) {
       // Re-throw ConversionError
       if (error instanceof ConversionError) {
@@ -281,6 +295,11 @@ export class LowLevelWebCodecsConverter implements VideoConverter {
       // For other errors (like invalid codec string), just warn and continue
       // Mediabunny might handle it differently
       console.warn(`[Decoder] Could not verify decoder support:`, error);
+      
+      return {
+        codecString: webCodecsCodec,
+        status: 'error',
+      };
     }
   }
 
@@ -430,7 +449,17 @@ export class LowLevelWebCodecsConverter implements VideoConverter {
 
       // Validate decoder support for input codec
       // This is critical for Android Chrome which may support H.264 encoding but not VP8/VP9/AV1 decoding
-      await this.validateDecoderSupport(inputVideoCodec);
+      const decoderResult = await this.validateDecoderSupport(inputVideoCodec);
+      
+      // Store decoder info in debugInfo (for external use)
+      this.debugInfo.inputVideoCodec = inputVideoCodec ?? 'unknown';
+      
+      // Log decoder validation result
+      if (decoderResult.status === 'supported') {
+        console.log(`[Decoder] Validation result: ${decoderResult.codecString} - Supported`);
+      } else if (decoderResult.status === 'unsupported') {
+        console.error(`[Decoder] Validation result: ${decoderResult.codecString} - NOT SUPPORTED`);
+      }
 
       // Read audio codec if available
       let inputAudioCodec: string | null = null;

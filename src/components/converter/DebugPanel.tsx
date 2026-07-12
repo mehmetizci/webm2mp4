@@ -196,36 +196,8 @@ export function DebugPanel({ debugInfo, isVisible, webCodecsDetection, selectedE
             <DebugRow label="MIME Type" value={debugInfo.fileMimeType} />
           </DebugSection>
 
-          {/* WebCodecs Capabilities - only show when detection is completed */}
-          <DebugSection title="WebCodecs Yetenekleri">
-            {detection?.status === 'idle' && (
-              <DebugRow 
-                label="Durum" 
-                value="Test henüz başlamadı" 
-                status="idle"
-              />
-            )}
-            {detection?.status === 'checking' && (
-              <DebugRow 
-                label="Durum" 
-                value="Test ediliyor..." 
-                status="idle"
-              />
-            )}
-            {detection?.status === 'failed' && (
-              <>
-                <DebugRow 
-                  label="Durum" 
-                  value="Test başarısız" 
-                  status="error"
-                />
-                <DebugRow 
-                  label="Hata" 
-                  value={detection.error || 'Bilinmeyen hata'} 
-                  status="error"
-                />
-              </>
-            )}
+          {/* WebCodecs API Availability */}
+          <DebugSection title="WebCodecs API">
             {detection?.status === 'completed' && detection?.capabilities && (
               <>
                 <DebugRow 
@@ -234,89 +206,134 @@ export function DebugPanel({ debugInfo, isVisible, webCodecsDetection, selectedE
                   status={detection.capabilities.secureContext ? 'completed' : 'error'}
                 />
                 <DebugRow 
-                  label="VideoEncoder" 
+                  label="VideoEncoder API" 
                   value={detection.capabilities.videoEncoder ? 'Mevcut' : 'Yok'} 
                   status={detection.capabilities.videoEncoder ? 'completed' : 'error'}
                 />
                 <DebugRow 
-                  label="VideoDecoder" 
+                  label="VideoDecoder API" 
                   value={detection.capabilities.videoDecoder ? 'Mevcut' : 'Yok'} 
                   status={detection.capabilities.videoDecoder ? 'completed' : 'error'}
                 />
                 <DebugRow 
-                  label="VideoFrame" 
+                  label="VideoFrame API" 
                   value={detection.capabilities.videoFrame ? 'Mevcut' : 'Yok'} 
                   status={detection.capabilities.videoFrame ? 'completed' : 'error'}
                 />
-                
-                {/* Individual Codec Test Results */}
+                {detection.capabilities.hardwareAcceleration && (
+                  <DebugRow 
+                    label="Hardware Acceleration" 
+                    value={detection.capabilities.hardwareAcceleration} 
+                  />
+                )}
+              </>
+            )}
+          </DebugSection>
+
+          {/* Input Decoder Support */}
+          <DebugSection title="Giriş Decoder Desteği">
+            {/* Input video codec info from Mediabunny */}
+            <DebugRow 
+              label="Giriş Video Codec" 
+              value={debugInfo.inputVideoCodec || '-'} 
+              status={debugInfo.inputVideoCodec ? 'completed' : 'idle'}
+            />
+            <DebugRow 
+              label="Codec String" 
+              value={debugInfo.inputVideoCodecString || '-'} 
+              status={debugInfo.inputVideoCodecString ? 'completed' : 'idle'}
+            />
+            <DebugRow 
+              label="Ses Codec" 
+              value={debugInfo.inputAudioCodec || 'Yok'} 
+              status={debugInfo.inputAudioCodec ? 'completed' : 'idle'}
+            />
+            {/* Decoder support status */}
+            {debugInfo.inputDecoderStatus && (
+              <DebugRow 
+                label="Decoder Destek" 
+                value={
+                  debugInfo.inputDecoderStatus === 'supported' ? 'Destekleniyor' :
+                  debugInfo.inputDecoderStatus === 'unsupported' ? 'Desteklenmiyor' :
+                  debugInfo.inputDecoderStatus === 'error' ? 'Test Hatası' :
+                  debugInfo.inputDecoderStatus === 'untested' ? 'Test Edilmedi' : '-'
+                }
+                status={
+                  debugInfo.inputDecoderStatus === 'supported' ? 'completed' :
+                  debugInfo.inputDecoderStatus === 'unsupported' || debugInfo.inputDecoderStatus === 'error' ? 'error' :
+                  'idle'
+                }
+              />
+            )}
+            <DebugRow 
+              label="Kullanılan Decoder" 
+              value={debugInfo.actualDecoderUsed || 'Mediabunny'} 
+              status={debugInfo.actualDecoderUsed ? 'completed' : 'idle'}
+            />
+          </DebugSection>
+
+          {/* Output Encoder Support */}
+          <DebugSection title="Çıkış Encoder Desteği">
+            {detection?.status === 'completed' && detection?.capabilities && (
+              <>
+                {/* H.264 Encoder profiles */}
                 {detection.capabilities.codecResults?.length > 0 && (
-                  <div className="mt-2 pt-2 border-t border-slate-200">
-                    <p className="text-xs text-slate-500 mb-1.5">Codec Test Sonuçları:</p>
+                  <>
+                    <p className="text-xs text-slate-500 mb-1.5">H.264 Encoder Testleri:</p>
                     {detection.capabilities.codecResults.map((result, index) => (
                       <DebugRow 
                         key={index}
-                        label={result.codec}
+                        label={`${result.codec} (${result.profile})`}
                         value={
                           result.supported === null ? 'Test edilmedi' :
                           result.supported ? 'Destekleniyor' : 'Desteklenmiyor'
                         }
                         status={
                           result.supported === null ? 'idle' :
-                          result.supported ? 'completed' : undefined
+                          result.supported ? 'completed' : 'error'
                         }
                       />
                     ))}
-                  </div>
+                  </>
                 )}
                 
-                {/* H.264 Status - use detection state directly */}
+                {/* Selected H.264 profile */}
                 <DebugRow 
-                  label="H.264 Encoder" 
-                  value={detection.capabilities.h264Supported ? 'Destekleniyor' : 'Desteklenmiyor'} 
-                  status={detection.capabilities.h264Supported ? 'completed' : undefined}
+                  label="Seçilen Profil" 
+                  value={debugInfo.webCodecsTestedCodec || '-'} 
+                  status={debugInfo.webCodecsH264Supported ? 'completed' : 'idle'}
                 />
-                
-                {debugInfo.webCodecsTestedCodec && debugInfo.webCodecsH264Supported && (
-                  <DebugRow 
-                    label="Test Edilen Codec" 
-                    value={debugInfo.webCodecsTestedCodec} 
-                  />
-                )}
-                
-                {debugInfo.webCodecsHardwareAcceleration && (
-                  <DebugRow 
-                    label="Hardware Acceleration" 
-                    value={debugInfo.webCodecsHardwareAcceleration} 
-                  />
-                )}
-                
-                {debugInfo.webCodecsTimedOut && (
-                  <DebugRow 
-                    label="Timeout" 
-                    value="Evet" 
-                    status="warning"
-                  />
-                )}
-                
-                {debugInfo.webCodecsDetectionTimeMs !== null && (
-                  <DebugRow 
-                    label="Tespit Süresi" 
-                    value={`${debugInfo.webCodecsDetectionTimeMs} ms`} 
-                    status={debugInfo.webCodecsTimedOut ? 'warning' : undefined}
-                  />
-                )}
-                
-                {debugInfo.webCodecsFailureDetails && (
-                  <DebugRow 
-                    label="Hata Detayı" 
-                    value={debugInfo.webCodecsFailureDetails} 
-                    status={debugInfo.webCodecsTimedOut ? 'warning' : 'error'}
-                  />
-                )}
               </>
             )}
+            {/* Detection timing info */}
+            {debugInfo.webCodecsTimedOut && (
+              <DebugRow 
+                label="Tespit Timeout" 
+                value="Evet" 
+                status="warning"
+              />
+            )}
+            {debugInfo.webCodecsDetectionTimeMs !== null && (
+              <DebugRow 
+                label="Tespit Süresi" 
+                value={`${debugInfo.webCodecsDetectionTimeMs} ms`} 
+              />
+            )}
           </DebugSection>
+
+          {/* Input Video Info */}
+          {(debugInfo.inputWidth || debugInfo.inputHeight) && (
+            <DebugSection title="Giriş Video Bilgileri">
+              <DebugRow 
+                label="Çözünürlük" 
+                value={debugInfo.inputWidth && debugInfo.inputHeight ? `${debugInfo.inputWidth}x${debugInfo.inputHeight}` : '-'} 
+              />
+              <DebugRow 
+                label="FPS" 
+                value={debugInfo.inputFrameRate ? `${debugInfo.inputFrameRate}` : '-'} 
+              />
+            </DebugSection>
+          )}
 
           {/* Conversion Engine Info */}
           <DebugSection title="Dönüşüm Motoru">
@@ -377,17 +394,13 @@ export function DebugPanel({ debugInfo, isVisible, webCodecsDetection, selectedE
             </DebugSection>
           )}
 
-          {/* Encoder Settings - Show actual encoder config from WebCodecs */}
+          {/* Output Video Info - Show actual encoder config from WebCodecs */}
           {actualEngine === 'webcodecs' && debugInfo.webCodecsEncoderConfig && (
-            <DebugSection title="Encoder Ayarları">
-              <DebugRow 
-                label="Kalite" 
-                value={debugInfo.webCodecsQualityPreset?.toUpperCase() || 'STANDART'} 
-                status="completed"
-              />
+            <DebugSection title="Çıkış Video Bilgileri">
               <DebugRow 
                 label="Codec" 
                 value={debugInfo.webCodecsEncoderConfig.codec?.toUpperCase() || 'H.264'} 
+                status="completed"
               />
               <DebugRow 
                 label="Çözünürlük" 
@@ -398,6 +411,10 @@ export function DebugPanel({ debugInfo, isVisible, webCodecsDetection, selectedE
               <DebugRow 
                 label="FPS" 
                 value={debugInfo.webCodecsEncoderConfig.framerate?.toString() || '30'} 
+              />
+              <DebugRow 
+                label="Kalite" 
+                value={debugInfo.webCodecsQualityPreset?.toUpperCase() || 'STANDART'} 
               />
               <DebugRow 
                 label="Hedef Bitrate" 
@@ -419,37 +436,16 @@ export function DebugPanel({ debugInfo, isVisible, webCodecsDetection, selectedE
                   status={Math.abs(debugInfo.webCodecsBitrateDifference) <= 15 ? 'completed' : 'warning'}
                 />
               )}
-              <DebugRow 
-                label="Hardware Mode" 
-                value={debugInfo.webCodecsHardwareMode || 'no-preference'} 
-              />
-              <DebugRow 
-                label="Hardware Accel." 
-                value={debugInfo.webCodecsEncoderConfig.hardwareAcceleration || 'no-preference'} 
-              />
-              <DebugRow 
-                label="Force Transcode" 
-                value={debugInfo.webCodecsEncoderConfig.forceTranscode ? 'Evet' : 'Hayır'} 
-              />
               {debugInfo.webCodecsBitrateModeRequested && (
                 <DebugRow 
-                  label="Bitrate Mode (İstenen)" 
-                  value={debugInfo.webCodecsBitrateModeRequested} 
+                  label="Bitrate Mode" 
+                  value={debugInfo.webCodecsEncoderConfig.bitrateMode || debugInfo.webCodecsBitrateModeRequested} 
                 />
               )}
-              {debugInfo.webCodecsEncoderConfig.bitrateMode && (
-                <DebugRow 
-                  label="Bitrate Mode (Gerçek)" 
-                  value={debugInfo.webCodecsEncoderConfig.bitrateMode} 
-                />
-              )}
-              {debugInfo.webCodecsBitrateModeSupported !== null && (
-                <DebugRow 
-                  label="Bitrate Mode Destekli" 
-                  value={debugInfo.webCodecsBitrateModeSupported ? 'Evet' : 'Hayır'} 
-                  status={debugInfo.webCodecsBitrateModeSupported ? 'completed' : 'warning'}
-                />
-              )}
+              <DebugRow 
+                label="Hardware Accel." 
+                value={debugInfo.webCodecsEncoderConfig.hardwareAcceleration || debugInfo.webCodecsHardwareMode || 'no-preference'} 
+              />
             </DebugSection>
           )}
 

@@ -699,6 +699,12 @@ export function WebmConverter() {
             videoBitrate: videoBitrateBps,
             audioBitrate: audioBitrateBps,
             totalBitrate: totalBitrateBps,
+            // Input video info from encoder
+            inputVideoCodec: encoderDebugInfo.inputVideoCodec,
+            inputAudioCodec: encoderDebugInfo.inputAudioCodec,
+            inputWidth: encoderDebugInfo.inputWidth || null,
+            inputHeight: encoderDebugInfo.inputHeight || null,
+            inputFrameRate: null, // Will be populated from metadata if available
           });
           
           // Convert to our result format (values in bps)

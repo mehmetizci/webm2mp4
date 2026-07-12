@@ -36,6 +36,17 @@ export interface ConversionDebugInfo {
   webCodecsDetectionTimeMs: number | null;
   webCodecsTimedOut: boolean | null;
   webCodecsCodecResults: Array<{ codec: string; profile: string; supported: boolean | null }>;
+  // Input video codec info (from Mediabunny)
+  inputVideoCodec: string | null;
+  inputAudioCodec: string | null;
+  inputWidth: number | null;
+  inputHeight: number | null;
+  inputFrameRate: number | null;
+  inputVideoCodecString: string | null;
+  inputDecoderSupported: boolean | null;
+  inputDecoderStatus: 'untested' | 'supported' | 'unsupported' | 'error' | null;
+  // Actual decoder used
+  actualDecoderUsed: string | null;
   // FFmpeg load status
   ffmpegLoadStatus: 'idle' | 'loading' | 'loaded' | 'error';
   coreJsLoadStatus: 'idle' | 'loading' | 'loaded' | 'error';
@@ -295,6 +306,16 @@ const initialDebugInfo: ConversionDebugInfo = {
   webCodecsDetectionTimeMs: null,
   webCodecsTimedOut: null,
   webCodecsCodecResults: [],
+  // Input video codec info (from Mediabunny)
+  inputVideoCodec: null,
+  inputAudioCodec: null,
+  inputWidth: null,
+  inputHeight: null,
+  inputFrameRate: null,
+  inputVideoCodecString: null,
+  inputDecoderSupported: null,
+  inputDecoderStatus: null,
+  actualDecoderUsed: null,
   // FFmpeg load status
   ffmpegLoadStatus: 'idle',
   coreJsLoadStatus: 'idle',
