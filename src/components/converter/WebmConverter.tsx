@@ -424,43 +424,38 @@ export function WebmConverter() {
       try {
         wakeLockRef.current = await navigator.wakeLock.request('screen');
         addLog?.('info', 'System', 'Ekran uyanık tutuluyor');
-        
-        // Handle visibility change - re-acquire wake lock if page becomes visible again
-        // Only log once when manually released (not auto-release on page hide)
-        let wasManuallyReleased = false;
-        wakeLockRef.current.addEventListener('release', () => {
-          // Only log if it wasn't our manual release
-          if (wasManuallyReleased) return;
-          addLog?.('info', 'System', 'Wake Lock serbest bırakıldı');
-        });
       } catch (err) {
         console.warn('[WakeLock] Request failed:', err);
       }
     }
   }, [addLog]);
 
-  // Idempotent wake lock release - prevents double release and double logging
+  // Idempotent wake lock release - use sentinel.released to prevent double release
   const releaseWakeLock = useCallback(async () => {
-    const lock = wakeLockRef.current;
-    if (!lock) return; // Already released
+    const sentinel = wakeLockRef.current;
+    if (!sentinel) return; // Already released or never acquired
     
     wakeLockRef.current = null; // Mark as released BEFORE actual release
     
     try {
-      await lock.release();
-      addLog?.('info', 'System', 'Wake Lock serbest bırakıldı');
+      // Only release if not already released by browser
+      if (!sentinel.released) {
+        await sentinel.release();
+        addLog?.('info', 'System', 'Wake Lock serbest bırakıldı');
+      }
     } catch (err) {
       console.warn('[WakeLock] Release failed:', err);
     }
   }, [addLog]);
 
-  // Release wake lock when component unmounts or conversion ends
+  // Release wake lock when component unmounts
   useEffect(() => {
     return () => {
-      if (wakeLockRef.current) {
-        wakeLockRef.current.release().catch(() => {});
-        wakeLockRef.current = null;
+      const sentinel = wakeLockRef.current;
+      if (sentinel && !sentinel.released) {
+        sentinel.release().catch(() => {});
       }
+      wakeLockRef.current = null;
     };
   }, []);
 
@@ -568,7 +563,7 @@ export function WebmConverter() {
           
           const result = await webCodecsConverter.convert({
             file: selectedFile,
-            bitrate: 2_000_000, // 2 Mbps
+            // Use default bitrate (650 kbps) - don't override
             framerate: 30,
             onProgress: (progress) => {
               console.log('[WebCodecs] Progress:', progress);
@@ -576,11 +571,12 @@ export function WebmConverter() {
               // Update stage for all conversion stages
               if (progress.stage === 'reading' || progress.stage === 'analyzing' || 
                   progress.stage === 'initializing' || progress.stage === 'encoding' || 
-                  progress.stage === 'finalizing' || progress.stage === 'complete') {
+                  progress.stage === 'converting' || progress.stage === 'finalizing' || 
+                  progress.stage === 'complete') {
                 setStage(progress.stage);
               }
               
-              // Update WebCodecs progress state
+              // Update WebCodecs progress state - use stage from progress callback
               if (progress.percent !== undefined) {
                 const elapsed = (Date.now() - webCodecsStartTimeRef.current) / 1000;
                 setWebCodecsProgress(prev => ({
@@ -590,6 +586,7 @@ export function WebmConverter() {
                   hasProgress: true,
                   encodedTime: progress.encodedTime ?? null,
                   encodingSpeed: progress.encodingSpeed ?? null,
+                  stage: progress.stage as ConversionStage,
                   // Don't overwrite totalDuration if already set
                 }));
               }
@@ -604,7 +601,7 @@ export function WebmConverter() {
                 percent: 0,
                 time: 0,
                 hasProgress: true,
-                stage: 'analyzing',
+                // Don't override stage here - let the progress callback handle it
               }));
               
               // Also update debug info with total duration

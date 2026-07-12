@@ -19,11 +19,10 @@ import {
   BufferTarget,
   canEncodeVideo,
   canEncodeAudio,
-  QUALITY_HIGH,
 } from 'mediabunny';
 
 // Constants
-const DEFAULT_VIDEO_BITRATE = 2_000_000;
+const DEFAULT_VIDEO_BITRATE = 650_000; // 650 kbps to match FFmpeg output
 const DEFAULT_FRAMERATE = 30;
 const SPEED_EMA_ALPHA = 0.3; // EMA smoothing factor
 
@@ -196,7 +195,9 @@ export class WebCodecsConverter implements VideoConverter {
           // This prevents the "fit" parameter requirement and works correctly for vertical videos
           frameRate,
           codec: 'avc', // H.264
-          bitrate: QUALITY_HIGH,
+          // Use numeric bitrate (650 kbps) to match FFmpeg's output size
+          // QUALITY_HIGH produces ~3.3 Mbps which is too large
+          bitrate: 650_000, // 650 kbps
           hardwareAcceleration: this.preferHardware ? 'prefer-hardware' : 'no-preference',
           keyFrameInterval: 2, // Keyframe every 2 seconds
         },
@@ -299,7 +300,7 @@ export class WebCodecsConverter implements VideoConverter {
       callback({
         percent,
         time: this.processedSeconds,
-        stage: stage as 'idle' | 'loading' | 'reading' | 'analyzing' | 'converting' | 'finalizing' | 'complete' | 'error',
+        stage: stage as 'idle' | 'loading' | 'reading' | 'analyzing' | 'initializing' | 'converting' | 'encoding' | 'finalizing' | 'complete' | 'error',
         hasProgress: true,
         encodedTime: this.processedSeconds,
         encodingSpeed: this.speedEMA > 0 ? this.speedEMA : null,

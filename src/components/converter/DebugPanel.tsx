@@ -346,11 +346,11 @@ export function DebugPanel({ debugInfo, isVisible, webCodecsDetection, selectedE
                 <>
                   <DebugRow 
                     label="Video Süresi" 
-                    value={`${debugInfo.totalDuration.toFixed(1)}s`} 
+                    value={`${debugInfo.totalDuration.toFixed(1)} saniye`} 
                   />
                   <DebugRow 
-                    label="Metadata Kaynağı" 
-                    value={debugInfo.metadataSource || 'Mediabunny'} 
+                    label="Metadata" 
+                    value="Mediabunny"
                   />
                 </>
               )}
@@ -453,8 +453,12 @@ export function DebugPanel({ debugInfo, isVisible, webCodecsDetection, selectedE
                   : null} 
               />
               <DebugRow 
-                label="Metadata Source" 
-                value={debugInfo.metadataSource === 'html5' ? 'HTML5 Video' : debugInfo.metadataSource === 'ffmpeg_fallback' ? 'FFmpeg Fallback' : null} 
+                label="Metadata Kaynağı" 
+                value={
+                  debugInfo.metadataSource === 'html5' ? 'HTML5 Video' : 
+                  debugInfo.metadataSource === 'ffmpeg_fallback' ? 'FFmpeg Fallback' : 
+                  debugInfo.metadataSource === 'mediabunny' ? 'Mediabunny' : null
+                } 
               />
               <DebugRow 
                 label="Encoding Hızı" 
