@@ -353,8 +353,11 @@ export class WebCodecsConverter implements VideoConverter {
         const audioTrack = audioTracks[0] ?? null;
         
         if (videoTrack) {
-          const trackInfo = await videoTrack.getTrackInfo();
-          const actualVideoBitrate = trackInfo.bitrate ?? this.debugInfo.targetBitrate;
+          // Get actual video bitrate from output file size and duration
+          // (Mediabunny InputVideoTrack doesn't have getTrackInfo method)
+          const actualVideoBitrate = this.inputDuration > 0
+            ? Math.round((outputBuffer.byteLength * 8) / this.inputDuration)
+            : this.debugInfo.targetBitrate;
           
           // Calculate bitrate difference percentage
           const bitrateDifference = this.debugInfo.targetBitrate > 0
@@ -362,11 +365,11 @@ export class WebCodecsConverter implements VideoConverter {
             : 0;
           
           outputAnalysis = {
-            videoCodec: trackInfo.codec ?? 'H.264',
+            videoCodec: 'H.264', // We know we encoded with AVC
             audioCodec: audioTrack ? 'AAC' : null,
-            width: trackInfo.width ?? this.debugInfo.outputWidth,
-            height: trackInfo.height ?? this.debugInfo.outputHeight,
-            frameRate: trackInfo.frameRate ?? frameRate,
+            width: this.debugInfo.outputWidth,
+            height: this.debugInfo.outputHeight,
+            frameRate: frameRate,
             duration: this.inputDuration,
             averageVideoBitrate: actualVideoBitrate,
             averageAudioBitrate: audioTrack ? 128_000 : null,
