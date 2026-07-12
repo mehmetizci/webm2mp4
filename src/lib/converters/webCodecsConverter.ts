@@ -281,6 +281,7 @@ export class WebCodecsConverter implements VideoConverter {
       this.reportProgress('initializing', 8, onProgress);
       
       // Build video options - only include width/height if target is different from source
+      // Include quality in video options for Mediabunny
       const videoOptions: Record<string, unknown> = {
         codec: encoderConfig.encoder.codec,
         bitrate: encoderConfig.encoder.bitrate,
@@ -288,6 +289,11 @@ export class WebCodecsConverter implements VideoConverter {
         hardwareAcceleration: encoderConfig.encoder.hardwareAcceleration,
         keyFrameInterval: encoderConfig.encoder.keyFrameInterval,
       };
+      
+      // CRITICAL: Verify bitrate is being set
+      console.log('[WebCodecs-Converter] FINAL videoOptions.bitrate:', videoOptions.bitrate);
+      console.log('[WebCodecs-Converter] Expected bitrate for quality "' + quality + '":', encoderConfig.encoder.bitrate);
+      console.log('[WebCodecs-Converter] videoOptions keys:', Object.keys(videoOptions));
       
       // Only add width/height if we're actually resizing
       if (targetWidth !== undefined || targetHeight !== undefined) {
@@ -311,6 +317,8 @@ export class WebCodecsConverter implements VideoConverter {
       this.debugInfo.conversionApiUsed = true;
       console.log('[WebCodecs-Converter] videoOptions passed to Conversion.init():');
       console.log('[WebCodecs-Converter]', JSON.stringify(videoOptions, null, 2));
+      console.log('[WebCodecs-Converter] Full Conversion.init call:');
+      console.log('[WebCodecs-Converter] video:', JSON.stringify(videoOptions));
       console.log('[WebCodecs] Conversion initialized:', {
         isValid: this.conversion.isValid,
         utilizedTracks: this.conversion.utilizedTracks.length,
