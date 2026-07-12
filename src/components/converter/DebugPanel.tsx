@@ -41,6 +41,20 @@ function formatEncodedTime(seconds: number | null): string {
   return `${m}:${s.padStart(5, '0')}`;
 }
 
+function formatMs(ms: number | null): string {
+  if (ms === null) return 'Tamamlanmadı';
+  if (ms < 1000) return `${Math.round(ms)} ms`;
+  if (ms < 60000) return `${(ms / 1000).toFixed(2)} sn`;
+  const minutes = Math.floor(ms / 60000);
+  const seconds = Math.round((ms % 60000) / 1000);
+  return `${minutes} dk ${seconds} sn`;
+}
+
+function formatSpeed(speed: number | null): string {
+  if (speed === null) return '-';
+  return `${speed.toFixed(2)}x`;
+}
+
 function StatusBadge({ status }: { status: string }) {
   const getStatusConfig = () => {
     switch (status) {
@@ -465,6 +479,117 @@ export function DebugPanel({ debugInfo, isVisible, webCodecsDetection, selectedE
               <DebugRow 
                 label="Hardware Mode (Tercih)" 
                 value={debugInfo.webCodecsHardwareMode || 'no-preference'} 
+              />
+            </DebugSection>
+          )}
+
+          {/* Performance Profile - WebCodecs only */}
+          {actualEngine === 'webcodecs' && debugInfo.webCodecsPerformanceMetrics && (
+            <DebugSection title="Performans Profili">
+              <DebugRow 
+                label="Durum" 
+                value={debugInfo.webCodecsPerformanceMetrics.conversionCompleted ? 'Tamamlandı' : 'Yarım kaldı'} 
+                status={debugInfo.webCodecsPerformanceMetrics.conversionCompleted ? 'completed' : 'warning'}
+              />
+              <DebugRow 
+                label="Metadata Hazırlama" 
+                value={formatMs(debugInfo.webCodecsPerformanceMetrics.metadataMs)} 
+                status={debugInfo.webCodecsPerformanceMetrics.metadataMs !== null ? 'completed' : 'idle'}
+              />
+              <DebugRow 
+                label="Input Açma" 
+                value={formatMs(debugInfo.webCodecsPerformanceMetrics.inputOpenMs)} 
+                status={debugInfo.webCodecsPerformanceMetrics.inputOpenMs !== null ? 'completed' : 'idle'}
+              />
+              <DebugRow 
+                label="Track Tespiti" 
+                value={formatMs(debugInfo.webCodecsPerformanceMetrics.trackDetectionMs)} 
+                status={debugInfo.webCodecsPerformanceMetrics.trackDetectionMs !== null ? 'completed' : 'idle'}
+              />
+              <DebugRow 
+                label="Decoder Destek Testi" 
+                value={formatMs(debugInfo.webCodecsPerformanceMetrics.decoderSupportTestMs)} 
+                status={debugInfo.webCodecsPerformanceMetrics.decoderSupportTestMs !== null ? 'completed' : 'idle'}
+              />
+              <DebugRow 
+                label="Video Sample Okuma" 
+                value={formatMs(debugInfo.webCodecsPerformanceMetrics.videoSampleReadMs)} 
+                status={debugInfo.webCodecsPerformanceMetrics.videoSampleReadMs !== null ? 'completed' : 'idle'}
+              />
+              <DebugRow 
+                label="Video Frame İşleme" 
+                value={formatMs(debugInfo.webCodecsPerformanceMetrics.videoFrameSubmitMs)} 
+                status={debugInfo.webCodecsPerformanceMetrics.videoFrameSubmitMs !== null ? 'completed' : 'idle'}
+              />
+              <DebugRow 
+                label="Video Frame Sayısı" 
+                value={debugInfo.webCodecsPerformanceMetrics.videoFrameCount?.toString() ?? 'Tamamlanmadı'} 
+              />
+              {debugInfo.webCodecsPerformanceMetrics.videoFrameCount && debugInfo.webCodecsPerformanceMetrics.videoFrameCount > 0 && (
+                <DebugRow 
+                  label="Ortalama Frame İşleme" 
+                  value={formatMs(debugInfo.webCodecsPerformanceMetrics.averageVideoFrameMs)} 
+                />
+              )}
+              <DebugRow 
+                label="İlk Frame Hazırlama" 
+                value={formatMs(debugInfo.webCodecsPerformanceMetrics.firstVideoFrameMs)} 
+                status={debugInfo.webCodecsPerformanceMetrics.firstVideoFrameMs !== null ? 'completed' : 'idle'}
+              />
+              {debugInfo.webCodecsPerformanceMetrics.audioSampleReadMs !== null ? (
+                <>
+                  <DebugRow 
+                    label="Audio Sample Okuma" 
+                    value={formatMs(debugInfo.webCodecsPerformanceMetrics.audioSampleReadMs)} 
+                  />
+                  <DebugRow 
+                    label="Audio Frame İşleme" 
+                    value={formatMs(debugInfo.webCodecsPerformanceMetrics.audioFrameSubmitMs)} 
+                  />
+                </>
+              ) : (
+                <>
+                  <DebugRow 
+                    label="Audio Sample Okuma" 
+                    value="Uygulanmadı" 
+                    status="idle"
+                  />
+                  <DebugRow 
+                    label="Audio Frame İşleme" 
+                    value="Uygulanmadı" 
+                    status="idle"
+                  />
+                </>
+              )}
+              <DebugRow 
+                label="Encoder Flush" 
+                value={formatMs(debugInfo.webCodecsPerformanceMetrics.encoderFlushMs)} 
+                status={debugInfo.webCodecsPerformanceMetrics.encoderFlushMs !== null ? 'completed' : 'idle'}
+              />
+              <DebugRow 
+                label="MP4 Finalize" 
+                value={formatMs(debugInfo.webCodecsPerformanceMetrics.muxFinalizeMs)} 
+                status={debugInfo.webCodecsPerformanceMetrics.muxFinalizeMs !== null ? 'completed' : 'idle'}
+              />
+              <DebugRow 
+                label="Blob Oluşturma" 
+                value={formatMs(debugInfo.webCodecsPerformanceMetrics.blobCreationMs)} 
+                status={debugInfo.webCodecsPerformanceMetrics.blobCreationMs !== null ? 'completed' : 'idle'}
+              />
+              <DebugRow 
+                label="Core Dönüşüm Süresi" 
+                value={formatMs(debugInfo.webCodecsPerformanceMetrics.conversionCoreMs)} 
+                status={debugInfo.webCodecsPerformanceMetrics.conversionCoreMs !== null ? 'completed' : 'idle'}
+              />
+              <DebugRow 
+                label="Toplam Süre" 
+                value={formatMs(debugInfo.webCodecsPerformanceMetrics.totalConversionMs)} 
+                status={debugInfo.webCodecsPerformanceMetrics.totalConversionMs !== null ? 'completed' : 'idle'}
+              />
+              <DebugRow 
+                label="Efektif Hız" 
+                value={formatSpeed(debugInfo.webCodecsPerformanceMetrics.effectiveSpeed)} 
+                status={debugInfo.webCodecsPerformanceMetrics.effectiveSpeed !== null ? 'completed' : 'idle'}
               />
             </DebugSection>
           )}

@@ -135,6 +135,28 @@ export interface LowLevelDebugInfo {
   usedLowLevelPipeline: boolean;
   conversionId: string | null;
   error: string | null;
+  // Performance metrics
+  performanceMetrics: {
+    metadataMs: number | null;
+    inputOpenMs: number | null;
+    trackDetectionMs: number | null;
+    decoderSupportTestMs: number | null;
+    videoSampleReadMs: number | null;
+    videoFrameSubmitMs: number | null;
+    videoFrameCount: number | null;
+    audioSampleReadMs: number | null;
+    audioFrameSubmitMs: number | null;
+    audioFrameCount: number | null;
+    encoderFlushMs: number | null;
+    muxFinalizeMs: number | null;
+    blobCreationMs: number | null;
+    conversionCoreMs: number | null;
+    totalConversionMs: number | null;
+    firstVideoFrameMs: number | null;
+    averageVideoFrameMs: number | null;
+    effectiveSpeed: number | null;
+    conversionCompleted: boolean;
+  };
 }
 
 export class LowLevelWebCodecsConverter implements VideoConverter {
@@ -199,6 +221,28 @@ export class LowLevelWebCodecsConverter implements VideoConverter {
       usedLowLevelPipeline: true,
       conversionId: null,
       error: null,
+      // Performance metrics
+      performanceMetrics: {
+        metadataMs: null,
+        inputOpenMs: null,
+        trackDetectionMs: null,
+        decoderSupportTestMs: null,
+        videoSampleReadMs: null,
+        videoFrameSubmitMs: null,
+        videoFrameCount: null,
+        audioSampleReadMs: null,
+        audioFrameSubmitMs: null,
+        audioFrameCount: null,
+        encoderFlushMs: null,
+        muxFinalizeMs: null,
+        blobCreationMs: null,
+        conversionCoreMs: null,
+        totalConversionMs: null,
+        firstVideoFrameMs: null,
+        averageVideoFrameMs: null,
+        effectiveSpeed: null,
+        conversionCompleted: false,
+      },
     };
   }
 
@@ -416,20 +460,45 @@ export class LowLevelWebCodecsConverter implements VideoConverter {
       throw new Error('Conversion aborted');
     }
 
+    // Performance tracking variables - declared outside try so catch can access them
+    let metadataStartMs: number | null = null;
+    let inputOpenStartMs: number | null = null;
+    let trackDetectionStartMs: number | null = null;
+    let decoderTestStartMs: number | null = null;
+    let hasInputAudio = false;
+    let processingStartTimeMs = 0;
+    let videoFrameCount = 0;
+    let audioSampleCount = 0;
+    let totalSampleReadTimeMs = 0;
+    let totalVideoAddTimeMs = 0;
+    let totalAudioAddTimeMs = 0;
+    let videoSampleReadMs = 0;
+    let audioSampleReadMs = 0;
+    let firstVideoFrameMs: number | null = null;
+
     try {
       // Step 1: Create Mediabunny Input
       const Mediabunny = await import('mediabunny');
+      inputOpenStartMs = performance.now();
       this.input = new Mediabunny.Input({
         source: new Mediabunny.BlobSource(file),
         formats: [WEBM],
       });
+      const inputOpenMs = performance.now() - inputOpenStartMs;
+      this.debugInfo.performanceMetrics.inputOpenMs = inputOpenMs;
 
       this.reportProgress('reading', 0, onProgress);
+      
+      // Read metadata
+      metadataStartMs = performance.now();
       const inputFormat = await this.input.getFormat();
+      const metadataFetchMs = performance.now() - metadataStartMs;
+      this.debugInfo.performanceMetrics.metadataMs = metadataFetchMs;
       this.debugInfo.inputFormat = 'WebM';
       console.log('[Input] Format:', inputFormat);
 
       // Get primary video track
+      trackDetectionStartMs = performance.now();
       this.videoTrack = await this.input.getPrimaryVideoTrack();
       if (!this.videoTrack) {
         throw new Error('Video track not found in input file');
@@ -437,13 +506,15 @@ export class LowLevelWebCodecsConverter implements VideoConverter {
 
       // Get primary audio track
       this.audioTrack = await this.input.getPrimaryAudioTrack();
-      const hasInputAudio = this.audioTrack !== null;
+      hasInputAudio = this.audioTrack !== null;
       console.log('[Input] Has audio track:', hasInputAudio);
 
       // Read video metadata
       const videoWidth = await this.videoTrack.getDisplayWidth();
       const videoHeight = await this.videoTrack.getDisplayHeight();
       const inputVideoCodec = await this.videoTrack.getCodec();
+      const trackDetectionMs = performance.now() - trackDetectionStartMs;
+      this.debugInfo.performanceMetrics.trackDetectionMs = trackDetectionMs;
 
       // Validate resolution
       if (
@@ -461,7 +532,10 @@ export class LowLevelWebCodecsConverter implements VideoConverter {
 
       // Validate decoder support for input codec
       // This is critical for Android Chrome which may support H.264 encoding but not VP8/VP9/AV1 decoding
+      decoderTestStartMs = performance.now();
       const decoderResult = await this.validateDecoderSupport(inputVideoCodec);
+      const decoderTestMs = performance.now() - decoderTestStartMs;
+      this.debugInfo.performanceMetrics.decoderSupportTestMs = decoderTestMs;
       
       // Store decoder info in debugInfo (for external use)
       this.debugInfo.inputVideoCodecString = decoderResult.codecString;
@@ -722,14 +796,20 @@ export class LowLevelWebCodecsConverter implements VideoConverter {
       // Step 9: Interleaved audio/video processing
       // Note: Mediabunny VideoSample/AudioSample timestamp is in SECONDS
       console.log('[Processing] Starting interleaved audio/video encoding...');
-      let videoFrameCount = 0;
-      let audioSampleCount = 0;
+      
+      // Reset counters for processing loop
+      videoFrameCount = 0;
+      audioSampleCount = 0;
+      totalSampleReadTimeMs = 0;
+      totalVideoAddTimeMs = 0;
+      totalAudioAddTimeMs = 0;
+      videoSampleReadMs = 0;
+      audioSampleReadMs = 0;
+      firstVideoFrameMs = null;
+      
+      processingStartTimeMs = performance.now();
       const startTimeMs = Date.now();
       
-      // Performance measurement
-      let totalSampleReadTimeMs = 0;
-      let totalVideoAddTimeMs = 0;
-      let totalAudioAddTimeMs = 0;
       let sampleReadStartTime = 0;
       
       // Track processed time based on sample timestamps
@@ -786,7 +866,9 @@ export class LowLevelWebCodecsConverter implements VideoConverter {
         
         sampleReadStartTime = performance.now();
         const result: VideoIteratorResult = await videoIterator.next();
-        totalSampleReadTimeMs += performance.now() - sampleReadStartTime;
+        const readTime = performance.now() - sampleReadStartTime;
+        videoSampleReadMs += readTime;
+        totalSampleReadTimeMs += readTime;
         
         if (result.done) {
           return null;
@@ -800,7 +882,9 @@ export class LowLevelWebCodecsConverter implements VideoConverter {
         
         sampleReadStartTime = performance.now();
         const result: VideoIteratorResult = await videoIterator.next();
-        totalSampleReadTimeMs += performance.now() - sampleReadStartTime;
+        const readTime = performance.now() - sampleReadStartTime;
+        videoSampleReadMs += readTime;
+        totalSampleReadTimeMs += readTime;
         
         if (result.done) {
           return null;
@@ -820,7 +904,9 @@ export class LowLevelWebCodecsConverter implements VideoConverter {
         
         sampleReadStartTime = performance.now();
         const result: AudioIteratorResult = await audioIterator.next();
-        totalSampleReadTimeMs += performance.now() - sampleReadStartTime;
+        const readTime = performance.now() - sampleReadStartTime;
+        audioSampleReadMs += readTime;
+        totalSampleReadTimeMs += readTime;
         
         if (result.done) {
           return null;
@@ -835,7 +921,9 @@ export class LowLevelWebCodecsConverter implements VideoConverter {
         
         sampleReadStartTime = performance.now();
         const result: AudioIteratorResult = await audioIterator.next();
-        totalSampleReadTimeMs += performance.now() - sampleReadStartTime;
+        const readTime = performance.now() - sampleReadStartTime;
+        audioSampleReadMs += readTime;
+        totalSampleReadTimeMs += readTime;
         
         if (result.done) {
           return null;
@@ -903,6 +991,11 @@ export class LowLevelWebCodecsConverter implements VideoConverter {
           // Process video sample
           if (currentVideoSample) {
             try {
+              // Track first video frame time
+              if (firstVideoFrameMs === null && videoFrameCount === 0) {
+                firstVideoFrameMs = performance.now() - processingStartTimeMs;
+              }
+              
               // Update processed seconds from video sample timestamp
               updateProcessedSeconds(currentVideoSample.timestamp, currentVideoSample.duration ?? (1 / detectedFrameRate));
               updateProgress();
@@ -963,9 +1056,8 @@ export class LowLevelWebCodecsConverter implements VideoConverter {
       this.reportProgress('finalizing', 95, onProgress);
       console.log('[Output] Finalizing...');
       
-      // Measure finalize time
-      const finalizeStartTime = performance.now();
-
+      // Measure encoder flush time
+      const flushStartTime = performance.now();
       if (this.videoEncoderSource) {
         // @ts-expect-error - VideoSampleSource might have end method (not in types)
         await this.videoEncoderSource.end?.();
@@ -974,9 +1066,12 @@ export class LowLevelWebCodecsConverter implements VideoConverter {
         // @ts-expect-error - AudioSampleSource might have end method (not in types)
         await this.audioEncoderSource.end?.();
       }
-
+      const encoderFlushMs = performance.now() - flushStartTime;
+      
+      // Measure mux/finalize time
+      const muxStartTime = performance.now();
       await this.output.finalize();
-      const finalizeTimeMs = performance.now() - finalizeStartTime;
+      const muxFinalizeMs = performance.now() - muxStartTime;
       console.log('[Output] Finalized');
 
       // Step 12: Get output buffer
@@ -984,6 +1079,11 @@ export class LowLevelWebCodecsConverter implements VideoConverter {
       if (!outputBuffer) {
         throw new Error('Conversion failed: no output buffer');
       }
+
+      // Measure blob creation time
+      const blobStartTime = performance.now();
+      const blob = new Blob([outputBuffer], { type: 'video/mp4' });
+      const blobCreationMs = performance.now() - blobStartTime;
 
       // Step 13: Analyze output
       let outputAnalysis: OutputAnalysis | undefined;
@@ -1092,10 +1192,42 @@ export class LowLevelWebCodecsConverter implements VideoConverter {
       }
 
       // Performance summary
-      const totalConversionTimeMs = Date.now() - startTimeMs;
+      const totalConversionTimeMs = performance.now() - processingStartTimeMs;
       const videoAddPercent = totalConversionTimeMs > 0 ? (totalVideoAddTimeMs / totalConversionTimeMs * 100).toFixed(1) : '0';
       const sampleReadPercent = totalConversionTimeMs > 0 ? (totalSampleReadTimeMs / totalConversionTimeMs * 100).toFixed(1) : '0';
-      const finalizePercent = totalConversionTimeMs > 0 ? (finalizeTimeMs / totalConversionTimeMs * 100).toFixed(1) : '0';
+      const flushPercent = totalConversionTimeMs > 0 ? (encoderFlushMs / totalConversionTimeMs * 100).toFixed(1) : '0';
+      const muxPercent = totalConversionTimeMs > 0 ? (muxFinalizeMs / totalConversionTimeMs * 100).toFixed(1) : '0';
+      
+      // Calculate average frame processing time
+      const averageVideoFrameMs = videoFrameCount > 0 ? totalVideoAddTimeMs / videoFrameCount : null;
+      
+      // Calculate effective speed
+      const effectiveSpeed = this.inputDuration > 0 && totalConversionTimeMs > 0
+        ? this.inputDuration / (totalConversionTimeMs / 1000)
+        : null;
+      
+      // Store performance metrics in debugInfo
+      this.debugInfo.performanceMetrics = {
+        metadataMs: this.debugInfo.performanceMetrics.metadataMs,
+        inputOpenMs: this.debugInfo.performanceMetrics.inputOpenMs,
+        trackDetectionMs: this.debugInfo.performanceMetrics.trackDetectionMs,
+        decoderSupportTestMs: this.debugInfo.performanceMetrics.decoderSupportTestMs,
+        videoSampleReadMs: videoSampleReadMs,
+        videoFrameSubmitMs: totalVideoAddTimeMs,
+        videoFrameCount: videoFrameCount,
+        audioSampleReadMs: hasInputAudio ? audioSampleReadMs : null,
+        audioFrameSubmitMs: hasInputAudio ? totalAudioAddTimeMs : null,
+        audioFrameCount: hasInputAudio ? audioSampleCount : null,
+        encoderFlushMs: encoderFlushMs,
+        muxFinalizeMs: muxFinalizeMs,
+        blobCreationMs: blobCreationMs,
+        conversionCoreMs: totalConversionTimeMs,
+        totalConversionMs: performance.now() - this.startTime,
+        firstVideoFrameMs: firstVideoFrameMs,
+        averageVideoFrameMs: averageVideoFrameMs,
+        effectiveSpeed: effectiveSpeed,
+        conversionCompleted: true,
+      };
       
       console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
       console.log('          PERFORMANCE METRICS');
@@ -1109,9 +1241,11 @@ export class LowLevelWebCodecsConverter implements VideoConverter {
       console.log('[Time Breakdown]');
       console.table({
         'Sample read (ms)': totalSampleReadTimeMs.toFixed(0) + ` (${sampleReadPercent}%)`,
-        'Video add (ms)': totalVideoAddTimeMs.toFixed(0) + ` (${videoAddPercent}%)`,
-        'Audio add (ms)': totalAudioAddTimeMs.toFixed(0),
-        'Finalize (ms)': finalizeTimeMs.toFixed(0) + ` (${finalizePercent}%)`,
+        'Video frame submit (ms)': totalVideoAddTimeMs.toFixed(0) + ` (${videoAddPercent}%)`,
+        'Audio frame submit (ms)': totalAudioAddTimeMs.toFixed(0),
+        'Encoder flush (ms)': encoderFlushMs.toFixed(0) + ` (${flushPercent}%)`,
+        'Mux/finalize (ms)': muxFinalizeMs.toFixed(0) + ` (${muxPercent}%)`,
+        'Blob creation (ms)': blobCreationMs.toFixed(0),
       });
       // Identify bottleneck
       if (parseFloat(videoAddPercent) > 60) {
@@ -1140,6 +1274,25 @@ export class LowLevelWebCodecsConverter implements VideoConverter {
       });
       console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 
+      // Log performance summary
+      const formatMs = (ms: number): string => {
+        if (ms < 1000) return `${ms.toFixed(0)}ms`;
+        if (ms < 60000) return `${(ms / 1000).toFixed(2)}s`;
+        const minutes = Math.floor(ms / 60000);
+        const seconds = ((ms % 60000) / 1000).toFixed(0);
+        return `${minutes}m ${seconds}s`;
+      };
+      console.log(
+        `[Performance] Metadata: ${formatMs(this.debugInfo.performanceMetrics.metadataMs ?? 0)} | ` +
+        `Input: ${formatMs(this.debugInfo.performanceMetrics.inputOpenMs ?? 0)} | ` +
+        `Video Read: ${formatMs(videoSampleReadMs)} | ` +
+        `Frame Submit: ${formatMs(totalVideoAddTimeMs)} | ` +
+        `Flush: ${formatMs(encoderFlushMs)} | ` +
+        `Mux: ${formatMs(muxFinalizeMs)} | ` +
+        `Total: ${formatMs(totalConversionTimeMs)} | ` +
+        `Speed: ${effectiveSpeed !== null ? effectiveSpeed.toFixed(2) + 'x' : 'N/A'}`
+      );
+
       // Calculate stats
       const encodeTime = (Date.now() - this.startTime) / 1000;
       const compressionRatio = this.inputDuration > 0 && file.size > 0
@@ -1153,7 +1306,7 @@ export class LowLevelWebCodecsConverter implements VideoConverter {
       this.releaseRuntimeResources();
 
       const result: ConversionResult = {
-        blob: new Blob([outputBuffer], { type: 'video/mp4' }),
+        blob,
         filename: getOutputFileName(file.name),
         fileSize: outputBuffer.byteLength,
         inputSize: file.size,
@@ -1172,6 +1325,31 @@ export class LowLevelWebCodecsConverter implements VideoConverter {
 
     } catch (error) {
       console.error('[Error]', error);
+      
+      // Store partial performance metrics on error
+      const partialConversionTimeMs = processingStartTimeMs > 0 ? performance.now() - processingStartTimeMs : null;
+      this.debugInfo.performanceMetrics = {
+        metadataMs: this.debugInfo.performanceMetrics.metadataMs,
+        inputOpenMs: this.debugInfo.performanceMetrics.inputOpenMs,
+        trackDetectionMs: this.debugInfo.performanceMetrics.trackDetectionMs,
+        decoderSupportTestMs: this.debugInfo.performanceMetrics.decoderSupportTestMs,
+        videoSampleReadMs: videoSampleReadMs,
+        videoFrameSubmitMs: totalVideoAddTimeMs,
+        videoFrameCount: videoFrameCount,
+        audioSampleReadMs: hasInputAudio ? audioSampleReadMs : null,
+        audioFrameSubmitMs: hasInputAudio ? totalAudioAddTimeMs : null,
+        audioFrameCount: hasInputAudio ? audioSampleCount : null,
+        encoderFlushMs: null,
+        muxFinalizeMs: null,
+        blobCreationMs: null,
+        conversionCoreMs: partialConversionTimeMs,
+        totalConversionMs: partialConversionTimeMs,
+        firstVideoFrameMs: firstVideoFrameMs,
+        averageVideoFrameMs: videoFrameCount > 0 ? totalVideoAddTimeMs / videoFrameCount : null,
+        effectiveSpeed: null,
+        conversionCompleted: false,
+      };
+      
       this.debugInfo.error = error instanceof Error ? error.message : String(error);
       this.debugInfo.isValid = false;
 

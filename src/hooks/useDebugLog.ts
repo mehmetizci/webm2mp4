@@ -103,6 +103,28 @@ export interface ConversionDebugInfo {
   webCodecsBitrateModeRequested: string | null;
   webCodecsConversionId: string | null;
   webCodecsPipeline: 'Low Level' | 'Standard' | null;
+  // WebCodecs performance metrics
+  webCodecsPerformanceMetrics: {
+    metadataMs: number | null;
+    inputOpenMs: number | null;
+    trackDetectionMs: number | null;
+    decoderSupportTestMs: number | null;
+    videoSampleReadMs: number | null;
+    videoFrameSubmitMs: number | null;
+    videoFrameCount: number | null;
+    audioSampleReadMs: number | null;
+    audioFrameSubmitMs: number | null;
+    audioFrameCount: number | null;
+    encoderFlushMs: number | null;
+    muxFinalizeMs: number | null;
+    blobCreationMs: number | null;
+    conversionCoreMs: number | null;
+    totalConversionMs: number | null;
+    firstVideoFrameMs: number | null;
+    averageVideoFrameMs: number | null;
+    effectiveSpeed: number | null;
+    conversionCompleted: boolean;
+  } | null;
   // Cleanup status
   cleanupStatus: 'idle' | 'cleaning' | 'completed' | 'warning' | 'error';
   cleanupValidation: {
@@ -363,6 +385,8 @@ const initialDebugInfo: ConversionDebugInfo = {
   webCodecsBitrateModeRequested: null,
   webCodecsConversionId: null,
   webCodecsPipeline: null,
+  // WebCodecs performance metrics
+  webCodecsPerformanceMetrics: null,
   // Cleanup status
   cleanupStatus: 'idle',
   cleanupValidation: null,
