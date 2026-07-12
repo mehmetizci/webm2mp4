@@ -31,6 +31,10 @@ import type { VideoConverter, ConvertOptions, ConversionResult, ConverterSupport
 import type { OutputAnalysis } from './types';
 import { checkWebCodecsSupport } from './webCodecsSupport';
 
+// Iterator result types for async generators
+type VideoIteratorResult = IteratorResult<VideoSample, void>;
+type AudioIteratorResult = IteratorResult<AudioSample, void>;
+
 // Audio bitrate constant (128 kbps AAC)
 const AUDIO_BITRATE_BPS = 128_000;
 
@@ -612,15 +616,14 @@ export class LowLevelWebCodecsConverter implements VideoConverter {
         if (videoIteratorDone) return null;
         
         sampleReadStartTime = performance.now();
-        // @ts-ignore - async iterator
-        const result = await videoSink.samples().next();
+        const result: VideoIteratorResult = await videoSink.samples().next();
         totalSampleReadTimeMs += performance.now() - sampleReadStartTime;
         
         if (result.done) {
           videoIteratorDone = true;
           return null;
         }
-        return result.value as VideoSample;
+        return result.value;
       };
 
       // Helper to peek next video sample without consuming
@@ -629,15 +632,14 @@ export class LowLevelWebCodecsConverter implements VideoConverter {
         if (videoIteratorDone) return null;
         
         sampleReadStartTime = performance.now();
-        // @ts-ignore - async iterator
-        const result = await videoSink.samples().next();
+        const result: VideoIteratorResult = await videoSink.samples().next();
         totalSampleReadTimeMs += performance.now() - sampleReadStartTime;
         
         if (result.done) {
           videoIteratorDone = true;
           return null;
         }
-        pendingVideoSample = result.value as VideoSample;
+        pendingVideoSample = result.value;
         return pendingVideoSample;
       };
 
@@ -651,15 +653,14 @@ export class LowLevelWebCodecsConverter implements VideoConverter {
         if (audioIteratorDone || !audioSink) return null;
         
         sampleReadStartTime = performance.now();
-        // @ts-ignore - async iterator
-        const result = await audioSink.samples().next();
+        const result: AudioIteratorResult = await audioSink.samples().next();
         totalSampleReadTimeMs += performance.now() - sampleReadStartTime;
         
         if (result.done) {
           audioIteratorDone = true;
           return null;
         }
-        return result.value as AudioSample;
+        return result.value;
       };
 
       // Helper to peek next audio sample without consuming
@@ -668,15 +669,14 @@ export class LowLevelWebCodecsConverter implements VideoConverter {
         if (audioIteratorDone || !audioSink) return null;
         
         sampleReadStartTime = performance.now();
-        // @ts-ignore - async iterator
-        const result = await audioSink.samples().next();
+        const result: AudioIteratorResult = await audioSink.samples().next();
         totalSampleReadTimeMs += performance.now() - sampleReadStartTime;
         
         if (result.done) {
           audioIteratorDone = true;
           return null;
         }
-        pendingAudioSample = result.value as AudioSample;
+        pendingAudioSample = result.value;
         return pendingAudioSample;
       };
 
@@ -727,7 +727,7 @@ export class LowLevelWebCodecsConverter implements VideoConverter {
           
           // Measure audio add time
           const audioAddStart = performance.now();
-          await this.audioEncoderSource.add(audioSample);
+          await this.audioEncoderSource!.add(audioSample);
           totalAudioAddTimeMs += performance.now() - audioAddStart;
           
           audioSampleCount++;
