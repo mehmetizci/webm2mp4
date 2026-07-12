@@ -73,6 +73,39 @@ function validateFile(file: File): { valid: boolean; error?: string } {
   return { valid: true };
 }
 
+// Get user-friendly error message based on WebCodecs error code
+function getWebCodecsErrorMessage(errorCode?: string, technicalMessage?: string): string {
+  switch (errorCode) {
+    case 'VIDEO_DECODE_FAILED':
+      return 'Bu cihaz WebM videosunu çözemedi. FFmpeg yöntemini kullanabilirsiniz.';
+    case 'VIDEO_ENCODE_FAILED':
+      return 'Video kodlanırken hata oluştu. FFmpeg yöntemini kullanabilirsiniz.';
+    case 'AUDIO_DECODE_FAILED':
+      return 'Ses çözümleme hatası oluştu. FFmpeg yöntemini kullanabilirsiniz.';
+    case 'AUDIO_ENCODE_FAILED':
+      return 'Ses kodlama hatası oluştu. FFmpeg yöntemini kullanabilirsiniz.';
+    case 'MP4_MUX_FAILED':
+      return 'MP4 dosyası oluşturulurken hata oluştu. FFmpeg yöntemini kullanabilirsiniz.';
+    case 'WEB_CODECS_ABORTED':
+      return 'Dönüştürme iptal edildi.';
+    case 'WEBM_DEMUX_FAILED':
+      return 'WebM dosyası okunamadı. FFmpeg yöntemini kullanabilirsiniz.';
+    default:
+      // Use technical message if available, otherwise generic message
+      if (technicalMessage) {
+        // Check if it's a decoder-specific error
+        if (technicalMessage.toLowerCase().includes('decode') || 
+            technicalMessage.toLowerCase().includes('vp8') || 
+            technicalMessage.toLowerCase().includes('vp9') || 
+            technicalMessage.toLowerCase().includes('av1')) {
+          return 'Bu cihaz WebM videosunu çözemedi. FFmpeg yöntemini kullanabilirsiniz.';
+        }
+        return `WebCodecs hatası: ${technicalMessage}. FFmpeg yöntemini kullanabilirsiniz.`;
+      }
+      return 'Dönüştürme başarısız oldu. FFmpeg yöntemini kullanabilirsiniz.';
+  }
+}
+
 export function WebmConverter() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [isConverting, setIsConverting] = useState(false);
@@ -510,6 +543,13 @@ export function WebmConverter() {
   }, [resetDebugInfo]);
 
   const handleConvert = useCallback(async () => {
+    // Double conversion prevention - check before setting state
+    if (isConverting) {
+      console.log('[Convert] Already converting, ignoring request');
+      addLog('warning', 'Convert', 'Dönüştürme zaten devam ediyor');
+      return;
+    }
+    
     if (!selectedFile) return;
     if (!selectedEngine) {
       addLog('error', 'Convert', 'Motor seçilmedi');
@@ -519,9 +559,10 @@ export function WebmConverter() {
     console.log('[Convert] Selected engine:', selectedEngine);
     console.log('[Convert] H264 supported:', webCodecsDetection.capabilities?.h264Supported);
 
+    // Set converting state first to prevent double conversion
+    setIsConverting(true);
     setConversionError(null);
     setResult(null);
-    setIsConverting(true);
     resetDebugInfo();
     setFileInfo(selectedFile.name, selectedFile.size, selectedFile.type);
     startElapsedTimer();
@@ -694,12 +735,18 @@ export function WebmConverter() {
           addLog('success', 'Convert', 'Dönüştürme tamamlandı (WebCodecs)');
           return; // Don't fall through to FFmpeg
         } catch (webCodecsError) {
-          // LowLevelWebCodecsConverter failed
+          // LowLevelWebCodecsConverter failed - classify error
+          const errorCode = (webCodecsError as { code?: string })?.code;
           const errorMessage = webCodecsError instanceof Error ? webCodecsError.message : 'Bilinmeyen hata';
-          addLog('error', 'Convert', `Düşük seviyeli WebCodecs dönüşümü başarısız: ${errorMessage}`);
+          
+          // Log with error code for debugging
+          addLog('error', 'Convert', `WebCodecs hatası [${errorCode || 'UNKNOWN'}]: ${errorMessage}`);
+          
+          // Get user-friendly message based on error code
+          const userMessage = getWebCodecsErrorMessage(errorCode, errorMessage);
           
           // Show modal to user with fallback options
-          setFallbackError('Düşük seviyeli WebCodecs dönüşümü başarısız oldu: ' + errorMessage);
+          setFallbackError(userMessage);
           setShowFallbackPrompt(true);
           
           // Don't throw - let user choose fallback option
@@ -796,17 +843,38 @@ export function WebmConverter() {
   }, [resetDebugInfo, addLog]);
 
   const handleFallbackRetry = useCallback((engine: ConversionEngine) => {
+    // Ensure we don't start multiple conversions
+    if (isConverting) {
+      console.log('[Fallback] Still converting, ignoring retry');
+      return;
+    }
+    
+    // Reset all conversion state
     setShowFallbackPrompt(false);
     setFallbackError(undefined);
-    handleEngineChange(engine);
     setConversionError(null);
+    setResult(null);
+    setWebCodecsProgress({
+      percent: 0,
+      time: 0,
+      stage: 'idle',
+      hasProgress: false,
+      encodedTime: null,
+      encodingSpeed: null,
+      totalDuration: null,
+    });
+    
+    // Change engine and start conversion
+    handleEngineChange(engine);
     setStage('idle');
+    
+    // Small delay to let React update state
     setTimeout(() => {
       if (selectedFile) {
         handleConvert();
       }
     }, 100);
-  }, [handleEngineChange, selectedFile, handleConvert]);
+  }, [isConverting, handleEngineChange, selectedFile, handleConvert]);
 
   const handleFallbackCancel = useCallback(() => {
     setShowFallbackPrompt(false);

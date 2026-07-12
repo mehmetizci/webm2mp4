@@ -28,12 +28,23 @@ import type {
   AudioSample,
 } from 'mediabunny';
 import type { VideoConverter, ConvertOptions, ConversionResult, ConverterSupport } from './types';
-import type { OutputAnalysis } from './types';
+import type { OutputAnalysis, ConversionErrorCode } from './types';
 import { checkWebCodecsSupport } from './webCodecsSupport';
 
 // Iterator result types for async generators
 type VideoIteratorResult = IteratorResult<VideoSample, void>;
 type AudioIteratorResult = IteratorResult<AudioSample, void>;
+
+// Custom error class with error code for better classification
+class ConversionError extends Error {
+  constructor(
+    message: string,
+    public readonly code: ConversionErrorCode = 'UNKNOWN'
+  ) {
+    super(message);
+    this.name = 'ConversionError';
+  }
+}
 
 // Audio bitrate constant (128 kbps AAC)
 const AUDIO_BITRATE_BPS = 128_000;
@@ -185,6 +196,94 @@ export class LowLevelWebCodecsConverter implements VideoConverter {
     return { ...this.debugInfo };
   }
 
+  // Validate that the device can decode the input video codec
+  // This is critical for Android Chrome which may support H.264 encoding but not VP8/VP9/AV1 decoding
+  private async validateDecoderSupport(inputVideoCodec: string | null): Promise<void> {
+    if (!inputVideoCodec) {
+      console.warn('[Decoder] No input codec detected, skipping decoder validation');
+      return;
+    }
+
+    // Normalize codec string (e.g., "V_VP9" -> "vp09", "V_VP8" -> "vp8", "V_AV1" -> "av01")
+    const normalizedCodec = inputVideoCodec.toLowerCase().replace('v_', '').replace('_', '');
+    
+    // Map to standard WebCodecs codec strings
+    let webCodecsCodec: string;
+    let profile: string | undefined;
+    
+    switch (normalizedCodec) {
+      case 'vp8':
+        webCodecsCodec = 'vp8';
+        break;
+      case 'vp9':
+        webCodecsCodec = 'vp09.00.10.08'; // VP9 profile 0
+        break;
+      case 'av1':
+        webCodecsCodec = 'av01'; // AV1
+        break;
+      case 'av01':
+        webCodecsCodec = 'av01';
+        break;
+      case 'h264':
+      case 'avc1':
+        webCodecsCodec = 'avc1.42E01e'; // H.264 Baseline
+        profile = 'baseline';
+        break;
+      default:
+        // Try to use as-is (might work for some codecs)
+        webCodecsCodec = inputVideoCodec;
+        console.warn(`[Decoder] Unknown codec "${inputVideoCodec}", attempting decoder check anyway`);
+    }
+
+    console.log(`[Decoder] Checking decoder support for: ${webCodecsCodec}`);
+
+    // Check if VideoDecoder is available
+    if (typeof VideoDecoder === 'undefined') {
+      console.warn('[Decoder] VideoDecoder API not available');
+      // Let it fail naturally when Mediabunny tries to use it
+      return;
+    }
+
+    try {
+      const config: VideoDecoderConfig = {
+        codec: webCodecsCodec,
+        codedWidth: 1920,
+        codedHeight: 1080,
+      };
+
+      // For H.264, we need to specify profile
+      if (profile && webCodecsCodec.startsWith('avc1')) {
+        (config as VideoDecoderConfig & { description?: Uint8Array }).description = new Uint8Array([
+          0x01, // profile
+          0x42, // baseline
+          0xE0, // compatible profiles
+          0x01, // level
+          0x0F, // nal units
+        ]);
+      }
+
+      const support = await VideoDecoder.isConfigSupported(config);
+      
+      if (!support.supported) {
+        const errorMessage = `Bu cihaz ${inputVideoCodec} kodlu videoyu çözemiyor. FFmpeg yöntemini kullanabilirsiniz.`;
+        console.error(`[Decoder] NOT SUPPORTED: ${webCodecsCodec}`);
+        throw new ConversionError(errorMessage, 'VIDEO_DECODE_FAILED');
+      }
+
+      console.log(`[Decoder] ✅ SUPPORTED: ${webCodecsCodec}`);
+      
+    } catch (error) {
+      // Re-throw ConversionError
+      if (error instanceof ConversionError) {
+        throw error;
+      }
+      
+      // For other errors (like invalid codec string), just warn and continue
+      // Mediabunny might handle it differently
+      console.warn(`[Decoder] Could not verify decoder support:`, error);
+    }
+  }
+
   // Only release runtime resources, keep debug info
   private releaseRuntimeResources(): void {
     this.videoEncoderSource = null;
@@ -328,6 +427,10 @@ export class LowLevelWebCodecsConverter implements VideoConverter {
       this.debugInfo.inputWidth = videoWidth;
       this.debugInfo.inputHeight = videoHeight;
       this.debugInfo.inputVideoCodec = inputVideoCodec ?? 'unknown';
+
+      // Validate decoder support for input codec
+      // This is critical for Android Chrome which may support H.264 encoding but not VP8/VP9/AV1 decoding
+      await this.validateDecoderSupport(inputVideoCodec);
 
       // Read audio codec if available
       let inputAudioCodec: string | null = null;
@@ -596,15 +699,14 @@ export class LowLevelWebCodecsConverter implements VideoConverter {
         this.reportProgress('encoding', encodingProgress, onProgress);
       };
 
-      // Process video samples
-      let videoIteratorDone = false;
-      let audioIteratorDone = true; // Start as done if no audio
+      // CRITICAL: Create iterators ONCE before the loop
+      // This prevents resource exhaustion on mobile devices
+      const videoIterator = videoSink.samples();
+      const audioIterator = audioSink?.samples() ?? null;
+      
+      // Track pending samples (peeked but not yet consumed)
       let pendingVideoSample: VideoSample | null = null;
       let pendingAudioSample: AudioSample | null = null;
-      
-      if (audioSink) {
-        audioIteratorDone = false;
-      }
 
       // Helper to get next video sample
       const getNextVideoSample = async (): Promise<VideoSample | null> => {
@@ -613,14 +715,12 @@ export class LowLevelWebCodecsConverter implements VideoConverter {
           pendingVideoSample = null;
           return sample;
         }
-        if (videoIteratorDone) return null;
         
         sampleReadStartTime = performance.now();
-        const result: VideoIteratorResult = await videoSink.samples().next();
+        const result: VideoIteratorResult = await videoIterator.next();
         totalSampleReadTimeMs += performance.now() - sampleReadStartTime;
         
         if (result.done) {
-          videoIteratorDone = true;
           return null;
         }
         return result.value;
@@ -629,14 +729,12 @@ export class LowLevelWebCodecsConverter implements VideoConverter {
       // Helper to peek next video sample without consuming
       const peekNextVideoSample = async (): Promise<VideoSample | null> => {
         if (pendingVideoSample) return pendingVideoSample;
-        if (videoIteratorDone) return null;
         
         sampleReadStartTime = performance.now();
-        const result: VideoIteratorResult = await videoSink.samples().next();
+        const result: VideoIteratorResult = await videoIterator.next();
         totalSampleReadTimeMs += performance.now() - sampleReadStartTime;
         
         if (result.done) {
-          videoIteratorDone = true;
           return null;
         }
         pendingVideoSample = result.value;
@@ -650,14 +748,13 @@ export class LowLevelWebCodecsConverter implements VideoConverter {
           pendingAudioSample = null;
           return sample;
         }
-        if (audioIteratorDone || !audioSink) return null;
+        if (!audioIterator) return null;
         
         sampleReadStartTime = performance.now();
-        const result: AudioIteratorResult = await audioSink.samples().next();
+        const result: AudioIteratorResult = await audioIterator.next();
         totalSampleReadTimeMs += performance.now() - sampleReadStartTime;
         
         if (result.done) {
-          audioIteratorDone = true;
           return null;
         }
         return result.value;
@@ -666,73 +763,118 @@ export class LowLevelWebCodecsConverter implements VideoConverter {
       // Helper to peek next audio sample without consuming
       const peekNextAudioSample = async (): Promise<AudioSample | null> => {
         if (pendingAudioSample) return pendingAudioSample;
-        if (audioIteratorDone || !audioSink) return null;
+        if (!audioIterator) return null;
         
         sampleReadStartTime = performance.now();
-        const result: AudioIteratorResult = await audioSink.samples().next();
+        const result: AudioIteratorResult = await audioIterator.next();
         totalSampleReadTimeMs += performance.now() - sampleReadStartTime;
         
         if (result.done) {
-          audioIteratorDone = true;
           return null;
         }
         pendingAudioSample = result.value;
         return pendingAudioSample;
       };
 
+      // Helper to close a sample safely
+      const closeSample = (sample: VideoSample | AudioSample | null) => {
+        if (sample) {
+          try {
+            sample.close();
+          } catch (e) {
+            // Ignore close errors
+          }
+        }
+      };
+
       // Interleaved processing loop
-      while (true) {
-        // Check abort
-        if (signal?.aborted) {
-          await this.cancelOutput();
-          throw new Error('Conversion aborted');
-        }
+      let videoDone = false;
+      let audioDone = !audioSink; // Start as done if no audio
+      let currentVideoSample: VideoSample | null = null;
+      let currentAudioSample: AudioSample | null = null;
 
-        // Peek at next samples to decide which to process
-        const nextVideo = await peekNextVideoSample();
-        const nextAudio = await peekNextAudioSample();
-        
-        // Determine which sample to process next based on timestamp
-        let videoSample: VideoSample | null = null;
-        let audioSample: AudioSample | null = null;
-        
-        if (nextVideo && (!nextAudio || nextVideo.timestamp <= nextAudio.timestamp)) {
-          videoSample = await getNextVideoSample();
-        } else if (nextAudio) {
-          audioSample = await getNextAudioSample();
-        }
+      try {
+        while (!videoDone || !audioDone) {
+          // Check abort
+          if (signal?.aborted) {
+            throw new ConversionError('Conversion aborted', 'WEB_CODECS_ABORTED');
+          }
 
-        // Check if both are done
-        if (!videoSample && !audioSample) {
-          break;
-        }
+          // Peek at next samples to decide which to process
+          let nextVideo: VideoSample | null = null;
+          let nextAudio: AudioSample | null = null;
+          
+          if (!videoDone && !currentVideoSample) {
+            nextVideo = await peekNextVideoSample();
+            if (!nextVideo) videoDone = true;
+          }
+          
+          if (!audioDone && !currentAudioSample && audioIterator) {
+            nextAudio = await peekNextAudioSample();
+            if (!nextAudio) audioDone = true;
+          }
 
-        // Process video sample
-        if (videoSample) {
-          // Update processed seconds from video sample timestamp
-          updateProcessedSeconds(videoSample.timestamp, videoSample.duration ?? (1 / detectedFrameRate));
-          updateProgress();
+          // Determine which sample to process next based on timestamp
+          if (!videoDone && !currentVideoSample && nextVideo) {
+            if (!nextAudio || nextVideo.timestamp <= nextAudio.timestamp) {
+              currentVideoSample = await getNextVideoSample();
+            }
+          }
           
-          // Measure video add time
-          const videoAddStart = performance.now();
-          await this.videoEncoderSource.add(videoSample);
-          totalVideoAddTimeMs += performance.now() - videoAddStart;
-          
-          videoFrameCount++;
-          videoSample.close();
-        } else if (audioSample) {
-          // Process audio sample
-          // Update processed seconds from audio sample timestamp
-          updateProcessedSeconds(audioSample.timestamp, audioSample.duration ?? 0.02); // ~20ms default audio frame
-          
-          // Measure audio add time
-          const audioAddStart = performance.now();
-          await this.audioEncoderSource!.add(audioSample);
-          totalAudioAddTimeMs += performance.now() - audioAddStart;
-          
-          audioSampleCount++;
-          audioSample.close();
+          if (!audioDone && !currentAudioSample && nextAudio) {
+            if (!currentVideoSample || (nextAudio && (!nextVideo || nextAudio.timestamp < nextVideo.timestamp))) {
+              currentAudioSample = await getNextAudioSample();
+            }
+          }
+
+          // Check if both are done
+          if (!currentVideoSample && !currentAudioSample) {
+            break;
+          }
+
+          // Process video sample
+          if (currentVideoSample) {
+            try {
+              // Update processed seconds from video sample timestamp
+              updateProcessedSeconds(currentVideoSample.timestamp, currentVideoSample.duration ?? (1 / detectedFrameRate));
+              updateProgress();
+              
+              // Measure video add time
+              const videoAddStart = performance.now();
+              await this.videoEncoderSource.add(currentVideoSample);
+              totalVideoAddTimeMs += performance.now() - videoAddStart;
+              
+              videoFrameCount++;
+            } finally {
+              // ALWAYS close the sample, even on error
+              closeSample(currentVideoSample);
+              currentVideoSample = null;
+            }
+          } else if (currentAudioSample) {
+            try {
+              // Process audio sample
+              // Update processed seconds from audio sample timestamp
+              updateProcessedSeconds(currentAudioSample.timestamp, currentAudioSample.duration ?? 0.02); // ~20ms default audio frame
+              
+              // Measure audio add time
+              const audioAddStart = performance.now();
+              await this.audioEncoderSource!.add(currentAudioSample);
+              totalAudioAddTimeMs += performance.now() - audioAddStart;
+              
+              audioSampleCount++;
+            } finally {
+              // ALWAYS close the sample, even on error
+              closeSample(currentAudioSample);
+              currentAudioSample = null;
+            }
+          }
         }
+      } finally {
+        // Cleanup: close any pending samples
+        closeSample(pendingVideoSample);
+        closeSample(pendingAudioSample);
+        closeSample(currentVideoSample);
+        closeSample(currentAudioSample);
       }
 
       // Update processedSeconds to exact input duration after all samples processed
@@ -757,11 +899,11 @@ export class LowLevelWebCodecsConverter implements VideoConverter {
       const finalizeStartTime = performance.now();
 
       if (this.videoEncoderSource) {
-        // @ts-ignore - VideoSampleSource might have end method
+        // @ts-expect-error - VideoSampleSource might have end method (not in types)
         await this.videoEncoderSource.end?.();
       }
       if (this.audioEncoderSource) {
-        // @ts-ignore - AudioSampleSource might have end method
+        // @ts-expect-error - AudioSampleSource might have end method (not in types)
         await this.audioEncoderSource.end?.();
       }
 
@@ -973,6 +1115,10 @@ export class LowLevelWebCodecsConverter implements VideoConverter {
       }
       this.releaseRuntimeResources();
 
+      // Re-throw with error code for better error classification
+      if (error instanceof ConversionError) {
+        throw error;
+      }
       throw error;
     }
   }
