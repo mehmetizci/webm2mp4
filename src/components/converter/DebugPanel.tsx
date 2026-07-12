@@ -9,7 +9,6 @@ interface DebugPanelProps {
   debugInfo: ConversionDebugInfo;
   isVisible: boolean;
   webCodecsDetection?: WebCodecsDetectionState;
-  renderCount?: number;
 }
 
 function formatBytes(bytes: number | null): string {
@@ -123,7 +122,7 @@ function DebugRow({ label, value, status }: { label: string; value: string | nul
   );
 }
 
-export function DebugPanel({ debugInfo, isVisible, webCodecsDetection, renderCount }: DebugPanelProps) {
+export function DebugPanel({ debugInfo, isVisible, webCodecsDetection }: DebugPanelProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [showLogs, setShowLogs] = useState(false);
 
@@ -152,9 +151,9 @@ export function DebugPanel({ debugInfo, isVisible, webCodecsDetection, renderCou
 
       {isOpen && (
         <div className="p-4 space-y-4 max-h-[500px] overflow-y-auto">
-          {/* Temporary Debug Info - Detection State */}
-          {renderCount !== undefined && detection && (
-            <DebugSection title="Detection State (Temp)">
+          {/* Detection State Info */}
+          {detection && (
+            <DebugSection title="Detection State">
               <DebugRow 
                 label="Status" 
                 value={detection.status} 
@@ -163,10 +162,6 @@ export function DebugPanel({ debugInfo, isVisible, webCodecsDetection, renderCou
                   detection.status === 'failed' ? 'error' :
                   detection.status === 'checking' ? 'idle' : undefined
                 }
-              />
-              <DebugRow 
-                label="Render Count" 
-                value={String(renderCount)} 
               />
               <DebugRow 
                 label="Updated At" 
@@ -198,7 +193,7 @@ export function DebugPanel({ debugInfo, isVisible, webCodecsDetection, renderCou
             <DebugRow label="MIME Type" value={debugInfo.fileMimeType} />
           </DebugSection>
 
-          {/* WebCodecs Capabilities - using detection prop or debugInfo */}
+          {/* WebCodecs Capabilities - only show when detection is completed */}
           <DebugSection title="WebCodecs Yetenekleri">
             {detection?.status === 'idle' && (
               <DebugRow 
@@ -228,34 +223,34 @@ export function DebugPanel({ debugInfo, isVisible, webCodecsDetection, renderCou
                 />
               </>
             )}
-            {(detection?.status === 'completed' || debugInfo.webCodecsSecureContext !== null) && (
+            {detection?.status === 'completed' && detection?.capabilities && (
               <>
                 <DebugRow 
                   label="Secure Context" 
-                  value={(detection?.capabilities?.secureContext ?? debugInfo.webCodecsSecureContext) ? 'Evet' : 'Hayır'} 
-                  status={(detection?.capabilities?.secureContext ?? debugInfo.webCodecsSecureContext) ? 'completed' : 'error'}
+                  value={detection.capabilities.secureContext ? 'Evet' : 'Hayır'} 
+                  status={detection.capabilities.secureContext ? 'completed' : 'error'}
                 />
                 <DebugRow 
                   label="VideoEncoder" 
-                  value={(detection?.capabilities?.videoEncoder ?? debugInfo.webCodecsVideoEncoder) ? 'Mevcut' : 'Yok'} 
-                  status={(detection?.capabilities?.videoEncoder ?? debugInfo.webCodecsVideoEncoder) ? 'completed' : 'error'}
+                  value={detection.capabilities.videoEncoder ? 'Mevcut' : 'Yok'} 
+                  status={detection.capabilities.videoEncoder ? 'completed' : 'error'}
                 />
                 <DebugRow 
                   label="VideoDecoder" 
-                  value={(detection?.capabilities?.videoDecoder ?? debugInfo.webCodecsVideoDecoder) ? 'Mevcut' : 'Yok'} 
-                  status={(detection?.capabilities?.videoDecoder ?? debugInfo.webCodecsVideoDecoder) ? 'completed' : 'error'}
+                  value={detection.capabilities.videoDecoder ? 'Mevcut' : 'Yok'} 
+                  status={detection.capabilities.videoDecoder ? 'completed' : 'error'}
                 />
                 <DebugRow 
                   label="VideoFrame" 
-                  value={(detection?.capabilities?.videoFrame ?? debugInfo.webCodecsVideoFrame) ? 'Mevcut' : 'Yok'} 
-                  status={(detection?.capabilities?.videoFrame ?? debugInfo.webCodecsVideoFrame) ? 'completed' : 'error'}
+                  value={detection.capabilities.videoFrame ? 'Mevcut' : 'Yok'} 
+                  status={detection.capabilities.videoFrame ? 'completed' : 'error'}
                 />
                 
                 {/* Individual Codec Test Results */}
-                {(detection?.capabilities?.codecResults ?? debugInfo.webCodecsCodecResults)?.length > 0 && (
+                {detection.capabilities.codecResults?.length > 0 && (
                   <div className="mt-2 pt-2 border-t border-slate-200">
                     <p className="text-xs text-slate-500 mb-1.5">Codec Test Sonuçları:</p>
-                    {debugInfo.webCodecsCodecResults.map((result, index) => (
+                    {detection.capabilities.codecResults.map((result, index) => (
                       <DebugRow 
                         key={index}
                         label={result.codec}
@@ -272,11 +267,11 @@ export function DebugPanel({ debugInfo, isVisible, webCodecsDetection, renderCou
                   </div>
                 )}
                 
-                {/* H.264 Status - neutral when not supported */}
+                {/* H.264 Status - use detection state directly */}
                 <DebugRow 
                   label="H.264 Encoder" 
-                  value={debugInfo.webCodecsH264Supported ? 'Destekleniyor' : 'Desteklenmiyor'} 
-                  status={debugInfo.webCodecsH264Supported ? 'completed' : undefined}
+                  value={detection.capabilities.h264Supported ? 'Destekleniyor' : 'Desteklenmiyor'} 
+                  status={detection.capabilities.h264Supported ? 'completed' : undefined}
                 />
                 
                 {debugInfo.webCodecsTestedCodec && debugInfo.webCodecsH264Supported && (
@@ -328,8 +323,8 @@ export function DebugPanel({ debugInfo, isVisible, webCodecsDetection, renderCou
             />
             <DebugRow 
               label="H.264 Destekli" 
-              value={debugInfo.webCodecsSupported ? 'Evet' : 'Hayır'} 
-              status={debugInfo.webCodecsSupported ? 'completed' : 'error'}
+              value={debugInfo.webCodecsH264Supported === true ? 'Evet' : debugInfo.webCodecsH264Supported === false ? 'Hayır' : '-'} 
+              status={debugInfo.webCodecsH264Supported === true ? 'completed' : undefined}
             />
             <DebugRow 
               label="Gerçekte Kullanılan" 

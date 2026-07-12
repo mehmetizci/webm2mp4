@@ -93,13 +93,8 @@ export function WebmConverter() {
   // Conversion engine state - only set after detection completes
   const [conversionEngine, setConversionEngine] = useState<ConversionEngine | null>(null);
   
-  // Track render count for debugging
-  const [renderCount, setRenderCount] = useState(0);
-  
-  // Increment render count
-  useEffect(() => {
-    setRenderCount(c => c + 1);
-  });
+  // Note: Render count tracking removed to prevent infinite loop
+  // Use React DevTools or browser profiler for render debugging
 
   // Wake Lock ref to prevent screen from sleeping during conversion
   const wakeLockRef = useRef<WakeLockSentinelType | null>(null);
@@ -122,53 +117,63 @@ export function WebmConverter() {
   const { metadata, previewUrl, error: metadataError } = useVideoMetadataState(selectedFile);
 
   // Update debug info when detection state changes
+  // Only run when capabilities are actually set (detection completed)
   useEffect(() => {
-    if (webCodecsDetection.capabilities) {
-      const caps = webCodecsDetection.capabilities;
-      updateDebugInfo({
-        webCodecsSecureContext: caps.secureContext,
-        webCodecsVideoEncoder: caps.videoEncoder,
-        webCodecsVideoDecoder: caps.videoDecoder,
-        webCodecsVideoFrame: caps.videoFrame,
-        webCodecsMediaRecorder: caps.mediaRecorder,
-        webCodecsSupported: caps.h264Supported,
-        webCodecsSupportReason: caps.failureReason,
-        webCodecsFailureDetails: caps.errorDetails,
-        webCodecsH264Supported: caps.h264Supported,
-        webCodecsH264BaselineSupported: caps.h264BaselineSupported,
-        webCodecsTestedCodec: caps.testedCodec,
-        webCodecsHardwareAcceleration: caps.hardwareAcceleration,
-        webCodecsDetectionTimeMs: caps.detectionTimeMs,
-        webCodecsTimedOut: caps.timedOut,
-        webCodecsCodecResults: caps.codecResults.map(r => ({
-          codec: r.codec,
-          profile: r.profile,
-          supported: r.supported,
-        })),
-      });
-    }
-  }, [webCodecsDetection, updateDebugInfo]);
+    if (!webCodecsDetection.capabilities) return;
+    
+    const caps = webCodecsDetection.capabilities;
+    updateDebugInfo({
+      webCodecsSecureContext: caps.secureContext,
+      webCodecsVideoEncoder: caps.videoEncoder,
+      webCodecsVideoDecoder: caps.videoDecoder,
+      webCodecsVideoFrame: caps.videoFrame,
+      webCodecsMediaRecorder: caps.mediaRecorder,
+      webCodecsSupported: caps.h264Supported,
+      webCodecsSupportReason: caps.failureReason,
+      webCodecsFailureDetails: caps.errorDetails,
+      webCodecsH264Supported: caps.h264Supported,
+      webCodecsH264BaselineSupported: caps.h264BaselineSupported,
+      webCodecsTestedCodec: caps.testedCodec,
+      webCodecsHardwareAcceleration: caps.hardwareAcceleration,
+      webCodecsDetectionTimeMs: caps.detectionTimeMs,
+      webCodecsTimedOut: caps.timedOut,
+      webCodecsCodecResults: caps.codecResults.map(r => ({
+        codec: r.codec,
+        profile: r.profile,
+        supported: r.supported,
+      })),
+    });
+  }, [webCodecsDetection.capabilities, updateDebugInfo]);
 
   // Update selected engine based on detection status
+  // Use ref to track if engine has been initialized to avoid dependency issues
+  const engineInitializedRef = useRef(false);
+  
   useEffect(() => {
-    if (conversionEngine === null && webCodecsDetection.status === 'completed') {
-      const savedEngine = localStorage.getItem(STORAGE_KEY) as ConversionEngine | null;
-      if (webCodecsDetection.capabilities?.h264Supported) {
-        // WebCodecs supported - use saved preference or default to webcodecs
-        if (savedEngine === 'webcodecs' || !savedEngine) {
-          setConversionEngine('webcodecs');
-          updateDebugInfo({ selectedEngine: 'webcodecs' });
-        } else {
-          setConversionEngine(savedEngine);
-          updateDebugInfo({ selectedEngine: savedEngine });
-        }
+    if (engineInitializedRef.current) return;
+    if (webCodecsDetection.status !== 'completed') return;
+    
+    engineInitializedRef.current = true;
+    
+    const savedEngine = localStorage.getItem(STORAGE_KEY) as ConversionEngine | null;
+    if (webCodecsDetection.capabilities?.h264Supported) {
+      // WebCodecs supported - use saved preference or default to webcodecs
+      if (savedEngine === 'webcodecs' || !savedEngine) {
+        // eslint-disable-next-line react-hooks/set-state-in-effect
+        setConversionEngine('webcodecs');
+        updateDebugInfo({ selectedEngine: 'webcodecs' });
       } else {
-        // WebCodecs not supported - use FFmpeg
-        setConversionEngine('ffmpeg');
-        updateDebugInfo({ selectedEngine: 'ffmpeg' });
+        // eslint-disable-next-line react-hooks/set-state-in-effect
+        setConversionEngine(savedEngine);
+        updateDebugInfo({ selectedEngine: savedEngine });
       }
+    } else {
+      // WebCodecs not supported - use FFmpeg
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setConversionEngine('ffmpeg');
+      updateDebugInfo({ selectedEngine: 'ffmpeg' });
     }
-  }, [webCodecsDetection.status, webCodecsDetection.capabilities, conversionEngine, updateDebugInfo]);
+  }, [webCodecsDetection.status, webCodecsDetection.capabilities, updateDebugInfo]);
 
   // Start WebCodecs detection on mount
   useEffect(() => {
@@ -290,7 +295,7 @@ export function WebmConverter() {
     });
     
     let uiWatchdog: number | null = null;
-    let active = true;
+    const active = true;
     
     uiWatchdog = window.setTimeout(() => {
       if (!active) return;
@@ -353,6 +358,7 @@ export function WebmConverter() {
   // Sync ffmpegError to conversionError
   useEffect(() => {
     if (ffmpegError && !conversionError) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setConversionError(ffmpegError);
     }
   }, [ffmpegError, conversionError]);
@@ -361,15 +367,36 @@ export function WebmConverter() {
     ? checkBrowserSupport() 
     : { supported: true };
 
+  // Long loading timer - only show after extended loading time
+  const longLoadingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  
   useEffect(() => {
+    // Clear existing timer on dependency change
+    if (longLoadingTimerRef.current) {
+      clearTimeout(longLoadingTimerRef.current);
+      longLoadingTimerRef.current = null;
+    }
+    
     if (ffmpegLoading && stage === 'loading') {
-      const timer = setTimeout(() => {
-        setShowLongLoading(true);
+      // Set timer to show long loading message
+      longLoadingTimerRef.current = setTimeout(() => {
+        // Only set if still loading
+        if (ffmpegLoading && stage === 'loading') {
+          setShowLongLoading(true);
+        }
       }, 10000);
-      return () => clearTimeout(timer);
     } else {
+      // Reset long loading when not loading
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setShowLongLoading(false);
     }
+    
+    return () => {
+      if (longLoadingTimerRef.current) {
+        clearTimeout(longLoadingTimerRef.current);
+        longLoadingTimerRef.current = null;
+      }
+    };
   }, [ffmpegLoading, stage]);
 
   // Wake Lock management - request on conversion start, release on end
@@ -719,7 +746,6 @@ export function WebmConverter() {
             debugInfo={debugInfo} 
             isVisible={true}
             webCodecsDetection={webCodecsDetection}
-            renderCount={renderCount}
           />
         )}
       </div>
