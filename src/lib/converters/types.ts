@@ -20,6 +20,7 @@ export type ConversionStage =
   | 'reading'
   | 'analyzing'
   | 'initializing'
+  | 'converting'
   | 'encoding'
   | 'finalizing'
   | 'complete'

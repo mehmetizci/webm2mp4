@@ -38,6 +38,7 @@ export type ConversionStage =
   | 'reading'
   | 'analyzing'
   | 'initializing'
+  | 'converting'
   | 'encoding'
   | 'finalizing'
   | 'complete'
@@ -106,6 +107,7 @@ export const STAGE_LABELS: Record<ConversionStage, string> = {
   reading: 'Dosya analiz ediliyor',
   analyzing: 'Video çözümleniyor',
   initializing: 'WebCodecs hazırlanıyor',
+  converting: 'Video dönüştürülüyor',
   encoding: 'Video dönüştürülüyor',
   finalizing: 'MP4 oluşturuluyor',
   complete: 'İşlem tamamlandı',
