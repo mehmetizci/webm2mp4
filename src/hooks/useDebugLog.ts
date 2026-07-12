@@ -18,8 +18,8 @@ export interface ConversionDebugInfo {
   fileSize: number | null;
   fileMimeType: string | null;
   // Conversion engine selection
-  selectedEngine: 'webcodecs' | 'ffmpeg' | null;
-  actualEngineUsed: 'webcodecs' | 'ffmpeg' | null;
+  selectedEngine: 'webcodecs' | 'ffmpeg-wasm' | null;
+  actualEngineUsed: 'webcodecs' | 'ffmpeg-wasm' | null;
   // WebCodecs detailed capabilities
   webCodecsSecureContext: boolean | null;
   webCodecsVideoEncoder: boolean | null;

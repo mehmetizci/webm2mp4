@@ -1,6 +1,6 @@
 // Conversion Engine Types
 
-export type ConversionEngine = 'webcodecs' | 'ffmpeg';
+export type ConversionEngine = 'webcodecs' | 'ffmpeg-wasm';
 
 export type ConversionStage =
   | 'preparing'

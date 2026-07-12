@@ -1,6 +1,6 @@
 'use client';
 
-import { Zap, Globe, AlertTriangle, CheckCircle, Loader2, RefreshCw } from 'lucide-react';
+import { Zap, Globe, AlertTriangle, CheckCircle, Loader2, RefreshCw, Clock } from 'lucide-react';
 import type { ConversionEngine, WebCodecsDetectionState } from '@/lib/converters/types';
 
 interface EngineSelectionProps {
@@ -10,6 +10,9 @@ interface EngineSelectionProps {
   disabled?: boolean;
   onRetryDetection?: () => void;
 }
+
+// WebCodecs converter is not yet implemented
+const WEBCODECS_NOT_IMPLEMENTED = true;
 
 export function EngineSelection({
   selectedEngine,
@@ -22,7 +25,8 @@ export function EngineSelection({
   
   const handleSelect = (engine: ConversionEngine) => {
     if (disabled) return;
-    if (engine === 'webcodecs' && status === 'completed' && !capabilities?.h264Supported) return;
+    // Don't allow selecting WebCodecs if not implemented
+    if (engine === 'webcodecs' && WEBCODECS_NOT_IMPLEMENTED) return;
     onEngineChange(engine);
   };
 
@@ -34,6 +38,16 @@ export function EngineSelection({
 
   // Determine WebCodecs status text
   const getWebCodecsStatus = () => {
+    // If WebCodecs converter is not implemented, show placeholder message
+    if (WEBCODECS_NOT_IMPLEMENTED) {
+      return (
+        <div className="flex items-start gap-1.5 text-slate-400 text-xs">
+          <Clock className="w-3 h-3 shrink-0 mt-0.5" />
+          <span>Dönüştürücü henüz uygulanmadı</span>
+        </div>
+      );
+    }
+    
     switch (status) {
       case 'idle':
         return <span className="text-slate-400 text-xs">Bekleniyor...</span>;
@@ -101,17 +115,18 @@ export function EngineSelection({
       </div>
       
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        {/* WebCodecs Option */}
+        {/* WebCodecs Option - Disabled if not implemented */}
         <EngineCard
           title="WebCodecs"
           description="Desteklenen modern cihazlarda daha hızlı dönüşüm."
-          badge="Hızlı"
-          badgeColor="bg-emerald-100 text-emerald-700"
+          badge={WEBCODECS_NOT_IMPLEMENTED ? "Yakında" : "Hızlı"}
+          badgeColor={WEBCODECS_NOT_IMPLEMENTED ? "bg-amber-100 text-amber-700" : "bg-emerald-100 text-emerald-700"}
           icon={<Zap className="w-5 h-5" />}
           selected={selectedEngine === 'webcodecs'}
           supported={status === 'completed' && capabilities?.h264Supported === true}
-          disabled={disabled || (status === 'completed' && !capabilities?.h264Supported)}
+          disabled={disabled || WEBCODECS_NOT_IMPLEMENTED || (status === 'completed' && !capabilities?.h264Supported)}
           onClick={() => handleSelect('webcodecs')}
+          isPlaceholder={WEBCODECS_NOT_IMPLEMENTED}
         >
           {getWebCodecsStatus()}
         </EngineCard>
@@ -123,10 +138,10 @@ export function EngineSelection({
           badge="Uyumlu"
           badgeColor="bg-blue-100 text-blue-700"
           icon={<Globe className="w-5 h-5" />}
-          selected={selectedEngine === 'ffmpeg'}
+          selected={selectedEngine === 'ffmpeg-wasm'}
           supported={true}
           disabled={disabled}
-          onClick={() => handleSelect('ffmpeg')}
+          onClick={() => handleSelect('ffmpeg-wasm')}
         >
           <div className="flex items-center gap-1.5 text-emerald-600 text-xs">
             <CheckCircle className="w-3 h-3" />
@@ -149,6 +164,7 @@ interface EngineCardProps {
   disabled: boolean;
   onClick: () => void;
   children: React.ReactNode;
+  isPlaceholder?: boolean;
 }
 
 function EngineCard({
@@ -162,14 +178,17 @@ function EngineCard({
   disabled,
   onClick,
   children,
+  isPlaceholder = false,
 }: EngineCardProps) {
   const baseClasses = `
-    relative p-4 rounded-xl border-2 transition-all cursor-pointer
+    relative p-4 rounded-xl border-2 transition-all
     ${selected 
-      ? 'border-[#376BFC] bg-blue-50' 
-      : supported && !disabled
-        ? 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50'
-        : 'border-slate-200 bg-slate-50 opacity-60 cursor-not-allowed'
+      ? 'border-[#376BFC] bg-blue-50 cursor-pointer' 
+      : isPlaceholder
+        ? 'border-slate-200 bg-slate-50 opacity-75 cursor-not-allowed'
+        : supported && !disabled
+          ? 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50 cursor-pointer'
+          : 'border-slate-200 bg-slate-50 opacity-60 cursor-not-allowed'
     }
   `;
 
@@ -177,7 +196,7 @@ function EngineCard({
     <button
       type="button"
       className={baseClasses}
-      onClick={onClick}
+      onClick={isPlaceholder ? undefined : onClick}
       disabled={disabled || !supported}
     >
       {/* Header */}

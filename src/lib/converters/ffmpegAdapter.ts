@@ -220,7 +220,7 @@ export class FFmpegConverter implements VideoConverter {
       compressionRatio,
       encodeTime,
       averageSpeed: null,
-      engine: 'ffmpeg',
+      engine: 'ffmpeg-wasm',
       hasAudio: true,
     };
   }

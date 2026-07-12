@@ -667,10 +667,25 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
     // Caps at 99% until completion, never goes backwards
     const calculateProgressPercent = (encodedTime: number | null): number => {
       const duration = videoDurationRef.current;
-      if (encodedTime === null || duration === null || duration <= 0) {
-        // No duration info - return current progress or 0
+      
+      // Validate duration - must be a reasonable positive value
+      if (duration === null || duration <= 0.1) {
+        // Duration too small or invalid - don't update progress
         return lastProgressPercent;
       }
+      
+      if (encodedTime === null) {
+        // No encoded time - return current progress
+        return lastProgressPercent;
+      }
+      
+      // Sanity check: if encoded time is unreasonably large compared to duration, something is wrong
+      if (encodedTime > duration * 1.05) {
+        // Encoded time exceeds duration - likely duration was wrong
+        // Don't update progress to avoid jumping to 99%
+        return lastProgressPercent;
+      }
+      
       const rawPercent = (encodedTime / duration) * 100;
       const newPercent = Math.floor(Math.min(99, rawPercent));
       // Progress never goes backwards

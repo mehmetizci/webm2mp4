@@ -3,12 +3,14 @@
 import { ChevronDown, ChevronUp, Bug, AlertTriangle, CheckCircle, XCircle, Info, Loader2 } from 'lucide-react';
 import { useState } from 'react';
 import type { ConversionDebugInfo, DebugLogEntry } from '@/hooks/useDebugLog';
-import type { WebCodecsDetectionState } from '@/lib/converters/types';
+import type { WebCodecsDetectionState, ConversionEngine } from '@/lib/converters/types';
 
 interface DebugPanelProps {
   debugInfo: ConversionDebugInfo;
   isVisible: boolean;
   webCodecsDetection?: WebCodecsDetectionState;
+  selectedEngine?: ConversionEngine | null;
+  actualEngine?: ConversionEngine | null;
 }
 
 function formatBytes(bytes: number | null): string {
@@ -122,7 +124,7 @@ function DebugRow({ label, value, status }: { label: string; value: string | nul
   );
 }
 
-export function DebugPanel({ debugInfo, isVisible, webCodecsDetection }: DebugPanelProps) {
+export function DebugPanel({ debugInfo, isVisible, webCodecsDetection, selectedEngine, actualEngine }: DebugPanelProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [showLogs, setShowLogs] = useState(false);
 
@@ -319,16 +321,16 @@ export function DebugPanel({ debugInfo, isVisible, webCodecsDetection }: DebugPa
           <DebugSection title="Dönüşüm Motoru">
             <DebugRow 
               label="Seçilen Motor" 
-              value={debugInfo.selectedEngine === 'webcodecs' ? 'WebCodecs' : debugInfo.selectedEngine === 'ffmpeg' ? 'FFmpeg WebAssembly' : null} 
+              value={selectedEngine === 'webcodecs' ? 'WebCodecs' : selectedEngine === 'ffmpeg-wasm' ? 'FFmpeg WebAssembly' : null} 
             />
             <DebugRow 
               label="H.264 Destekli" 
-              value={debugInfo.webCodecsH264Supported === true ? 'Evet' : debugInfo.webCodecsH264Supported === false ? 'Hayır' : '-'} 
-              status={debugInfo.webCodecsH264Supported === true ? 'completed' : undefined}
+              value={webCodecsDetection?.capabilities?.h264Supported === true ? 'Evet' : webCodecsDetection?.capabilities?.h264Supported === false ? 'Hayır' : '-'} 
+              status={webCodecsDetection?.capabilities?.h264Supported === true ? 'completed' : undefined}
             />
             <DebugRow 
               label="Gerçekte Kullanılan" 
-              value={debugInfo.actualEngineUsed === 'webcodecs' ? 'WebCodecs' : debugInfo.actualEngineUsed === 'ffmpeg' ? 'FFmpeg WebAssembly' : null} 
+              value={actualEngine === 'webcodecs' ? 'WebCodecs' : actualEngine === 'ffmpeg-wasm' ? 'FFmpeg WebAssembly' : null} 
             />
           </DebugSection>
 

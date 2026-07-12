@@ -48,15 +48,47 @@ export function ConversionProgress({ progress }: ConversionProgressProps) {
   };
 
   // Calculate estimated remaining time based on encoding speed
+  // Uses totalDuration if available, otherwise estimates from encoded time and speed
   const estimatedRemainingTime = (): string | null => {
-    if (progress.encodedTime === null || progress.encodedTime === undefined || 
-        progress.encodingSpeed === null || progress.encodingSpeed === undefined ||
-        progress.encodingSpeed <= 0) {
+    // Need at least 3 seconds elapsed and valid data
+    if (progress.time < 3) {
+      return 'Hesaplanıyor...';
+    }
+    
+    const totalDuration = progress.totalDuration;
+    const encodedTime = progress.encodedTime;
+    const speed = progress.encodingSpeed;
+    
+    // Need valid total duration
+    if (totalDuration === null || totalDuration === undefined || totalDuration <= 0.1) {
       return null;
     }
-    // Estimate total video time if we haven't reached it yet
-    const remainingVideoTime = Math.max(0, (progress.encodedTime || 0) / progress.encodingSpeed - (progress.encodedTime || 0));
-    const remainingWallTime = remainingVideoTime / progress.encodingSpeed;
+    
+    // Need valid encoded time
+    if (encodedTime === null || encodedTime === undefined || encodedTime <= 0) {
+      return null;
+    }
+    
+    // Use the speed from FFmpeg if available, otherwise calculate from elapsed time
+    const effectiveSpeed = speed !== null && speed !== undefined && speed > 0 
+      ? speed 
+      : (encodedTime / progress.time);
+    
+    if (effectiveSpeed <= 0) {
+      return null;
+    }
+    
+    // Calculate remaining video time
+    const remainingVideoTime = Math.max(0, totalDuration - encodedTime);
+    
+    // Estimate remaining wall clock time
+    const remainingWallTime = remainingVideoTime / effectiveSpeed;
+    
+    // Don't show if remaining time is unreasonable (more than 2x current elapsed time would suggest)
+    if (remainingWallTime > progress.time * 2) {
+      return 'Hesaplanıyor...';
+    }
+    
     return formatTime(remainingWallTime);
   };
 
@@ -165,12 +197,16 @@ export function ConversionProgress({ progress }: ConversionProgressProps) {
             <span className="text-slate-700 font-mono">{progress.encodingSpeed.toFixed(3)}x</span>
           </div>
         )}
-        {estimatedRemainingTime() && (
-          <div className="flex items-center justify-between text-xs">
-            <span className="text-slate-500">Tahmini kalan süre:</span>
-            <span className="text-slate-700 font-mono">{estimatedRemainingTime()}</span>
-          </div>
-        )}
+        {(() => {
+          const remaining = estimatedRemainingTime();
+          if (remaining === null) return null;
+          return (
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-slate-500">Tahmini kalan süre:</span>
+              <span className={`font-mono ${remaining === 'Hesaplanıyor...' ? 'text-slate-400' : 'text-slate-700'}`}>{remaining}</span>
+            </div>
+          );
+        })()}
       </div>
 
       <div className="space-y-1">

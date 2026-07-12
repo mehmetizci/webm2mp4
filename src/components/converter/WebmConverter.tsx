@@ -90,8 +90,9 @@ export function WebmConverter() {
     createInitialDetectionState()
   );
   
-  // Conversion engine state - only set after detection completes
-  const [conversionEngine, setConversionEngine] = useState<ConversionEngine | null>(null);
+  // Conversion engine states
+  const [selectedEngine, setSelectedEngine] = useState<ConversionEngine | null>(null);
+  const [actualEngine, setActualEngine] = useState<ConversionEngine | null>(null);
   
   // Note: Render count tracking removed to prevent infinite loop
   // Use React DevTools or browser profiler for render debugging
@@ -156,24 +157,16 @@ export function WebmConverter() {
     engineInitializedRef.current = true;
     
     const savedEngine = localStorage.getItem(STORAGE_KEY) as ConversionEngine | null;
-    if (webCodecsDetection.capabilities?.h264Supported) {
-      // WebCodecs supported - use saved preference or default to webcodecs
-      if (savedEngine === 'webcodecs' || !savedEngine) {
-        // eslint-disable-next-line react-hooks/set-state-in-effect
-        setConversionEngine('webcodecs');
-        updateDebugInfo({ selectedEngine: 'webcodecs' });
-      } else {
-        // eslint-disable-next-line react-hooks/set-state-in-effect
-        setConversionEngine(savedEngine);
-        updateDebugInfo({ selectedEngine: savedEngine });
-      }
-    } else {
-      // WebCodecs not supported - use FFmpeg
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setConversionEngine('ffmpeg');
-      updateDebugInfo({ selectedEngine: 'ffmpeg' });
-    }
-  }, [webCodecsDetection.status, webCodecsDetection.capabilities, updateDebugInfo]);
+    
+    // Since WebCodecs converter is not yet implemented, default to FFmpeg
+    // In the future, when WebCodecs converter is implemented, we can use:
+    // if (webCodecsDetection.capabilities?.h264Supported) { ... }
+    
+    // Default to FFmpeg WebAssembly (WebCodecs converter not implemented)
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setSelectedEngine('ffmpeg-wasm');
+    updateDebugInfo({ selectedEngine: 'ffmpeg-wasm' });
+  }, [webCodecsDetection.status, updateDebugInfo]);
 
   // Start WebCodecs detection on mount
   useEffect(() => {
@@ -282,8 +275,8 @@ export function WebmConverter() {
     resetWebCodecsCache();
     addLog('info', 'WebCodecs', 'Tespit yeniden başlatılıyor...');
     
-    // Reset conversion engine to trigger re-selection
-    setConversionEngine(null);
+    // Reset engine initialization to trigger re-selection
+    engineInitializedRef.current = false;
     
     // Set to checking state
     setWebCodecsDetection({
@@ -349,7 +342,7 @@ export function WebmConverter() {
 
   // Save engine preference to localStorage
   const handleEngineChange = useCallback((engine: ConversionEngine) => {
-    setConversionEngine(engine);
+    setSelectedEngine(engine);
     localStorage.setItem(STORAGE_KEY, engine);
     updateDebugInfo({ selectedEngine: engine });
     addLog('info', 'Engine', `Motor seçildi: ${engine}`);
@@ -513,6 +506,16 @@ export function WebmConverter() {
     await requestWakeLock();
 
     try {
+      // Check selected engine and use appropriate converter
+      // Note: WebCodecs converter is not yet implemented, so we always use FFmpeg
+      // In the future, when WebCodecs is implemented, we would check selectedEngine here
+      
+      // For now, always use FFmpeg since WebCodecs converter is not implemented
+      // Set actualEngine to FFmpeg
+      setActualEngine('ffmpeg-wasm');
+      updateDebugInfo({ actualEngineUsed: 'ffmpeg-wasm' });
+      addLog('info', 'Convert', `Motor seçildi: FFmpeg WebAssembly`);
+
       // FFmpeg yüklenmemişse yükle
       if (!ffmpegLoaded) {
         setStage('loading');
@@ -690,7 +693,7 @@ export function WebmConverter() {
             />
 
             <EngineSelection
-              selectedEngine={conversionEngine}
+              selectedEngine={selectedEngine}
               onEngineChange={handleEngineChange}
               webCodecsDetection={webCodecsDetection}
               disabled={isConverting || ffmpegLoading}
@@ -746,6 +749,8 @@ export function WebmConverter() {
             debugInfo={debugInfo} 
             isVisible={true}
             webCodecsDetection={webCodecsDetection}
+            selectedEngine={selectedEngine}
+            actualEngine={actualEngine}
           />
         )}
       </div>

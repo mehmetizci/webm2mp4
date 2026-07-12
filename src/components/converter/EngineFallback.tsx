@@ -50,7 +50,7 @@ export function EngineFallback({
             Vazgeç
           </button>
           <button
-            onClick={() => onRetry('ffmpeg')}
+            onClick={() => onRetry('ffmpeg-wasm')}
             className="flex-1 flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl bg-[#376BFC] text-white font-medium text-sm hover:bg-[#2858E0] transition-colors"
           >
             <RotateCcw className="w-4 h-4" />
