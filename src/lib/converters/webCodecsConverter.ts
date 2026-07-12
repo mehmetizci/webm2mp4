@@ -132,6 +132,16 @@ export class WebCodecsConverter implements VideoConverter {
       signal,
     } = options;
 
+    // CRITICAL: Log quality value received
+    console.log('[WebCodecs-Converter] ===== CONVERT FUNCTION START =====');
+    console.log('[WebCodecs-Converter] Received quality:', quality);
+    console.log('[WebCodecs-Converter] Received options:', { 
+      quality, 
+      targetWidth, 
+      targetHeight, 
+      frameRate 
+    });
+
     // Check abort signal
     if (signal?.aborted) {
       throw new Error('Conversion aborted');
@@ -196,12 +206,16 @@ export class WebCodecsConverter implements VideoConverter {
       const outputWidth = targetWidth ?? videoWidth;
       const outputHeight = targetHeight ?? videoHeight;
       
+      console.log('[WebCodecs-Converter] Calling getEncoderConfig with quality:', quality);
+      
       const encoderConfig = getEncoderConfig(
         outputWidth,
         outputHeight,
         frameRate,
         quality as QualityPreset
       );
+      
+      console.log('[WebCodecs-Converter] getEncoderConfig returned bitrate:', encoderConfig.encoder.bitrate);
       
       // Enhanced encoder config logging for verification
       console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
@@ -295,6 +309,8 @@ export class WebCodecsConverter implements VideoConverter {
       });
       
       this.debugInfo.conversionApiUsed = true;
+      console.log('[WebCodecs-Converter] videoOptions passed to Conversion.init():');
+      console.log('[WebCodecs-Converter]', JSON.stringify(videoOptions, null, 2));
       console.log('[WebCodecs] Conversion initialized:', {
         isValid: this.conversion.isValid,
         utilizedTracks: this.conversion.utilizedTracks.length,

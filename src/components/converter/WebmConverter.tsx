@@ -561,12 +561,17 @@ export function WebmConverter() {
             totalDuration: null,
           });
           
+          console.log('[Quality-DEBUG] ===== CONVERSION START =====');
+          console.log('[Quality-DEBUG] settings.quality:', settings.quality);
+          console.log('[Quality-DEBUG] settings:', JSON.stringify(settings));
+          
           const result = await webCodecsConverter.convert({
             file: selectedFile,
             quality: settings.quality,
             framerate: 30,
             onProgress: (progress) => {
               console.log('[WebCodecs] Progress:', progress);
+              console.log('[Quality-DEBUG] Current settings.quality:', settings.quality);
               
               // Update stage for all conversion stages
               if (progress.stage === 'reading' || progress.stage === 'analyzing' || 
