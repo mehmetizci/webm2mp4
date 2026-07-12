@@ -9,23 +9,13 @@ interface ConversionProgressProps {
   progress: ProgressType;
 }
 
-const STAGE_DESCRIPTIONS: Record<string, string> = {
-  loading: 'FFmpeg motoru yükleniyor...',
-  reading: 'Video dosyası işleniyor...',
-  converting: 'Video H.264 codec\'e dönüştürülüyor...',
-  finalizing: 'MP4 dosyası paketleniyor...',
-};
-
 export function ConversionProgress({ progress }: ConversionProgressProps) {
-  const showPreparing = !progress.hasProgress && progress.stage !== 'loading' && progress.stage !== 'complete' && progress.stage !== 'error';
-  const showTimeEstimate = progress.hasProgress || progress.time > 2;
-  
-  // Check if we have total duration info - if not, show indeterminate animation
+  // Always show progress from the start (0% minimum)
   const hasTotalDuration = progress.totalDuration !== null && progress.totalDuration !== undefined && progress.totalDuration > 0;
 
   // Format encoded time (seconds to mm:ss or hh:mm:ss)
   const formatEncodedTime = (seconds: number | null | undefined): string => {
-    if (seconds === null || seconds === undefined) return '--';
+    if (seconds === null || seconds === undefined) return '00:00';
     const h = Math.floor(seconds / 3600);
     const m = Math.floor((seconds % 3600) / 60);
     const s = Math.floor(seconds % 60);
@@ -37,7 +27,7 @@ export function ConversionProgress({ progress }: ConversionProgressProps) {
 
   // Format total duration (seconds to mm:ss or hh:mm:ss)
   const formatTotalDuration = (seconds: number | null | undefined): string => {
-    if (seconds === null || seconds === undefined) return '--';
+    if (seconds === null || seconds === undefined) return '--:--';
     const h = Math.floor(seconds / 3600);
     const m = Math.floor((seconds % 3600) / 60);
     const s = Math.floor(seconds % 60);
@@ -48,7 +38,6 @@ export function ConversionProgress({ progress }: ConversionProgressProps) {
   };
 
   // Calculate estimated remaining time based on encoding speed
-  // Uses totalDuration if available, otherwise estimates from encoded time and speed
   const estimatedRemainingTime = (): string | null => {
     // Need at least 3 seconds elapsed and valid data
     if (progress.time < 3) {
@@ -105,33 +94,18 @@ export function ConversionProgress({ progress }: ConversionProgressProps) {
               stroke="#E2E8F0"
               strokeWidth="6"
             />
-            {hasTotalDuration ? (
-              // Determinate progress bar
-              <circle
-                cx="50"
-                cy="50"
-                r="45"
-                fill="none"
-                stroke="#376BFC"
-                strokeWidth="6"
-                strokeLinecap="round"
-                strokeDasharray={`${progress.percent * 2.83} 283`}
-                className="transition-all duration-300"
-              />
-            ) : (
-              // Indeterminate animation - scanning effect
-              <circle
-                cx="50"
-                cy="50"
-                r="45"
-                fill="none"
-                stroke="#376BFC"
-                strokeWidth="6"
-                strokeLinecap="round"
-                strokeDasharray="40 243"
-                className="animate-[spin_1.5s_linear_infinite]"
-              />
-            )}
+            {/* Always show determinate progress - start from 0 */}
+            <circle
+              cx="50"
+              cy="50"
+              r="45"
+              fill="none"
+              stroke="#376BFC"
+              strokeWidth="6"
+              strokeLinecap="round"
+              strokeDasharray={`${Math.max(0, progress.percent) * 2.83} 283`}
+              className="transition-all duration-300"
+            />
           </svg>
         </div>
         <div className="absolute inset-0 flex items-center justify-center">
@@ -141,43 +115,28 @@ export function ConversionProgress({ progress }: ConversionProgressProps) {
 
       <div className="text-center space-y-2">
         <p className="text-slate-800 font-medium text-base">
-          {showPreparing ? 'Hazırlanıyor...' : 'Videonuz MP4 formatına dönüştürülüyor'}
+          Videonuz MP4 formatına dönüştürülüyor
         </p>
         <p className="text-slate-500 text-sm">
-          {showPreparing ? 'Lütfen bekleyin...' : (STAGE_LABELS[progress.stage] || 'İşleniyor...')}
+          {STAGE_LABELS[progress.stage] || 'İşleniyor...'}
         </p>
-        {showPreparing ? (
-          <p className="text-slate-400 text-xs">
-            Dönüştürme başlatılıyor...
-          </p>
-        ) : STAGE_DESCRIPTIONS[progress.stage] && (
-          <p className="text-slate-400 text-xs">
-            {STAGE_DESCRIPTIONS[progress.stage]}
-          </p>
-        )}
       </div>
 
       <div className="w-full max-w-xs space-y-3">
         <div className="flex justify-between text-sm">
           <span className="text-slate-700 font-medium">
-            {hasTotalDuration ? `${progress.percent.toFixed(0)}%` : '--%'}
+            {Math.max(0, progress.percent).toFixed(0)}%
           </span>
           <span className="text-slate-500">
-            {showTimeEstimate ? formatTime(progress.time) : '--'}
+            {formatTime(progress.time)}
           </span>
         </div>
         
         <div className="w-full h-2 bg-slate-200 rounded-full overflow-hidden">
-          {hasTotalDuration ? (
-            // Determinate progress bar
-            <div
-              className="h-full bg-[#376BFC] rounded-full transition-all duration-300 ease-out"
-              style={{ width: `${progress.percent}%` }}
-            />
-          ) : (
-            // Indeterminate animation - sliding bar
-            <div className="h-full bg-[#376BFC] rounded-full animate-[slide_1.5s_ease-in-out_infinite]" />
-          )}
+          <div
+            className="h-full bg-[#376BFC] rounded-full transition-all duration-300 ease-out"
+            style={{ width: `${Math.max(0, progress.percent)}%` }}
+          />
         </div>
       </div>
 

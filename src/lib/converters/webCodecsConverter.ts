@@ -108,14 +108,14 @@ export class WebCodecsConverter implements VideoConverter {
     }
 
     try {
-      // Report initial progress
-      this.reportProgress('reading', 0, onProgress);
-      
       // Step 1: Create Mediabunny Input from WebM file
       const input = new (await import('mediabunny')).Input({
         source: new (await import('mediabunny')).BlobSource(file),
         formats: [WEBM],
       });
+      
+      // Report reading stage with duration info
+      this.reportProgress('reading', 0, onProgress);
       
       // Get input format info
       const inputFormat = await input.getFormat();
@@ -129,8 +129,19 @@ export class WebCodecsConverter implements VideoConverter {
       // Actual audio encoding depends on canEncodeAudio check
       this.debugInfo.inputAudioCodec = 'Opus/Vorbis';
       
-      // Report analyzing progress
-      this.reportProgress('analyzing', 5, onProgress);
+      // Get input duration from metadata FIRST - before any other processing
+      try {
+        if (input.getDurationFromMetadata) {
+          const duration = await input.getDurationFromMetadata();
+          this.inputDuration = typeof duration === 'number' && duration > 0 ? duration : 30;
+          console.log('[WebCodecs] Duration from metadata:', this.inputDuration);
+        }
+      } catch (e) {
+        console.warn('[WebCodecs] Could not get duration from metadata:', e);
+      }
+      
+      // Report analyzing stage WITH duration now available
+      this.reportProgress('analyzing', 2, onProgress);
       
       // Step 2: Create Mediabunny Output for MP4
       const outputTarget = new BufferTarget();
@@ -140,6 +151,7 @@ export class WebCodecsConverter implements VideoConverter {
       });
       
       // Step 3: Check codec support
+      this.reportProgress('converting', 5, onProgress);
       const videoCodecSupport = await canEncodeVideo('avc');
       const audioCodecSupport = await canEncodeAudio('aac');
       
@@ -154,7 +166,7 @@ export class WebCodecsConverter implements VideoConverter {
       this.debugInfo.outputAudioCodec = audioCodecSupport ? 'AAC' : 'None';
       
       // Step 4: Initialize conversion with Mediabunny Conversion API
-      this.reportProgress('converting', 10, onProgress);
+      this.reportProgress('converting', 8, onProgress);
       
       this.conversion = await Conversion.init({
         input,
@@ -184,18 +196,6 @@ export class WebCodecsConverter implements VideoConverter {
         console.warn('[WebCodecs] Discarded tracks:', this.conversion.discardedTracks);
       }
       
-      // Get input duration - try to get from metadata, fallback to default
-      let inputDuration = 30;
-      try {
-        if (input.getDurationFromMetadata) {
-          const result = await input.getDurationFromMetadata();
-          inputDuration = typeof result === 'number' ? result : 30;
-        }
-      } catch (e) {
-        console.warn('[WebCodecs] Could not get duration from metadata:', e);
-      }
-      this.inputDuration = inputDuration || 30;
-      
       // Set up progress callback
       this.conversion.onProgress = (progress: number, processedTime: number) => {
         this.processedSeconds = processedTime;
@@ -216,7 +216,7 @@ export class WebCodecsConverter implements VideoConverter {
       };
       
       // Step 5: Execute conversion
-      this.reportProgress('converting', 15, onProgress);
+      this.reportProgress('converting', 10, onProgress);
       await this.conversion.execute();
       
       // Step 6: Finalize

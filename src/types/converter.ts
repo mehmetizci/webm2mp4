@@ -102,10 +102,10 @@ export const QUALITY_PRESETS: Record<QualityPreset, { crf: number; maxrate: numb
 export const STAGE_LABELS: Record<ConversionStage, string> = {
   idle: '',
   loading: 'Dönüştürücü hazırlanıyor',
-  reading: 'Video dosyası okunuyor',
-  analyzing: 'Video analiz ediliyor',
-  converting: 'Video H.264 codec\'e dönüştürülüyor',
-  finalizing: 'MP4 dosyası paketleniyor',
+  reading: 'Video dosyası analiz ediliyor',
+  analyzing: 'Video çözümleniyor',
+  converting: 'H.264 kodlanıyor',
+  finalizing: 'MP4 oluşturuluyor',
   complete: 'İşlem tamamlandı',
   error: 'Hata oluştu',
 };
