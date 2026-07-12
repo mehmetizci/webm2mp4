@@ -544,9 +544,22 @@ export function WebmConverter() {
         addLog('info', 'Convert', '[WebCodecs] Conversion started with Mediabunny');
         console.log('[WebCodecs] Conversion started with Mediabunny');
         
-        // Import and use WebCodecs converter
-        const { getWebCodecsConverter } = await import('@/lib/converters/webCodecsConverter');
-        const webCodecsConverter = getWebCodecsConverter();
+        // Use low-level converter for accurate bitrate control
+        // Set NEXT_PUBLIC_USE_LOW_LEVEL_CONVERTER=true in environment to enable
+        const useLowLevel = process.env.NEXT_PUBLIC_USE_LOW_LEVEL_CONVERTER === 'true';
+        
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        let converter: any;
+        
+        if (useLowLevel) {
+          console.log('[WebCodecs] Using LOW-LEVEL converter for accurate bitrate control');
+          const { LowLevelWebCodecsConverter } = await import('@/lib/converters/lowLevelWebCodecsConverter');
+          converter = new LowLevelWebCodecsConverter();
+        } else {
+          console.log('[WebCodecs] Using standard Mediabunny converter');
+          const { getWebCodecsConverter } = await import('@/lib/converters/webCodecsConverter');
+          converter = getWebCodecsConverter();
+        }
         
         try {
           // Initialize WebCodecs progress state
@@ -565,11 +578,11 @@ export function WebmConverter() {
           console.log('[Quality-DEBUG] settings.quality:', settings.quality);
           console.log('[Quality-DEBUG] settings:', JSON.stringify(settings));
           
-          const result = await webCodecsConverter.convert({
+          const result = await converter.convert({
             file: selectedFile,
             quality: settings.quality,
             framerate: 30,
-            onProgress: (progress) => {
+            onProgress: (progress: { percent: number; time: number; stage: string; hasProgress?: boolean; encodedTime?: number | null; encodingSpeed?: number | null; totalDuration?: number | null }) => {
               console.log('[WebCodecs] Progress:', progress);
               console.log('[Quality-DEBUG] Current settings.quality:', settings.quality);
               
@@ -578,7 +591,7 @@ export function WebmConverter() {
                   progress.stage === 'initializing' || progress.stage === 'encoding' || 
                   progress.stage === 'converting' || progress.stage === 'finalizing' || 
                   progress.stage === 'complete') {
-                setStage(progress.stage);
+                setStage(progress.stage as ConversionStage);
               }
               
               // Update WebCodecs progress state - use stage from progress callback
@@ -596,7 +609,7 @@ export function WebmConverter() {
                 }));
               }
             },
-            onMetadata: (metadata) => {
+            onMetadata: (metadata: { totalDurationSeconds: number; width: number; height: number; frameRate: number; hasAudio: boolean; videoCodec: string; audioCodec: string | null }) => {
               console.log('[WebCodecs] Metadata received:', metadata);
               
               // Update WebCodecs progress with metadata
@@ -620,7 +633,7 @@ export function WebmConverter() {
           console.log('[WebCodecs] Conversion result:', result);
           
           // Get encoder debug info from converter
-          const encoderDebugInfo = webCodecsConverter.getDebugInfo();
+          const encoderDebugInfo = converter.getDebugInfo();
           
           // Calculate bitrates - all in bps
           const videoDuration = result.duration;
