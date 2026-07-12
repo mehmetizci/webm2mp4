@@ -24,6 +24,8 @@ import type {
   OutputAudioTrack,
   VideoEncodingConfig,
   AudioEncodingConfig,
+  VideoSample,
+  AudioSample,
 } from 'mediabunny';
 import type { VideoConverter, ConvertOptions, ConversionResult, ConverterSupport } from './types';
 import type { OutputAnalysis } from './types';
@@ -591,51 +593,91 @@ export class LowLevelWebCodecsConverter implements VideoConverter {
       };
 
       // Process video samples
-      let nextVideoSample: IteratorResult<unknown> | null = null;
-      let nextAudioSample: IteratorResult<unknown> | null = null;
       let videoIteratorDone = false;
       let audioIteratorDone = true; // Start as done if no audio
+      let pendingVideoSample: VideoSample | null = null;
+      let pendingAudioSample: AudioSample | null = null;
       
       if (audioSink) {
         audioIteratorDone = false;
       }
 
       // Helper to get next video sample
-      const getNextVideoSample = async () => {
-        if (videoIteratorDone) return null;
-        if (!nextVideoSample) {
-          sampleReadStartTime = performance.now();
-          // @ts-ignore - async iterator
-          nextVideoSample = await videoSink.samples().next();
-          totalSampleReadTimeMs += performance.now() - sampleReadStartTime;
+      const getNextVideoSample = async (): Promise<VideoSample | null> => {
+        if (pendingVideoSample) {
+          const sample = pendingVideoSample;
+          pendingVideoSample = null;
+          return sample;
         }
-        if (nextVideoSample?.done) {
+        if (videoIteratorDone) return null;
+        
+        sampleReadStartTime = performance.now();
+        // @ts-ignore - async iterator
+        const result = await videoSink.samples().next();
+        totalSampleReadTimeMs += performance.now() - sampleReadStartTime;
+        
+        if (result.done) {
           videoIteratorDone = true;
-          nextVideoSample = null;
           return null;
         }
-        const sample = nextVideoSample?.value;
-        nextVideoSample = null;
-        return sample;
+        return result.value as VideoSample;
+      };
+
+      // Helper to peek next video sample without consuming
+      const peekNextVideoSample = async (): Promise<VideoSample | null> => {
+        if (pendingVideoSample) return pendingVideoSample;
+        if (videoIteratorDone) return null;
+        
+        sampleReadStartTime = performance.now();
+        // @ts-ignore - async iterator
+        const result = await videoSink.samples().next();
+        totalSampleReadTimeMs += performance.now() - sampleReadStartTime;
+        
+        if (result.done) {
+          videoIteratorDone = true;
+          return null;
+        }
+        pendingVideoSample = result.value as VideoSample;
+        return pendingVideoSample;
       };
 
       // Helper to get next audio sample
-      const getNextAudioSample = async () => {
-        if (audioIteratorDone || !audioSink) return null;
-        if (!nextAudioSample) {
-          sampleReadStartTime = performance.now();
-          // @ts-ignore - async iterator
-          nextAudioSample = await audioSink.samples().next();
-          totalSampleReadTimeMs += performance.now() - sampleReadStartTime;
+      const getNextAudioSample = async (): Promise<AudioSample | null> => {
+        if (pendingAudioSample) {
+          const sample = pendingAudioSample;
+          pendingAudioSample = null;
+          return sample;
         }
-        if (nextAudioSample?.done) {
+        if (audioIteratorDone || !audioSink) return null;
+        
+        sampleReadStartTime = performance.now();
+        // @ts-ignore - async iterator
+        const result = await audioSink.samples().next();
+        totalSampleReadTimeMs += performance.now() - sampleReadStartTime;
+        
+        if (result.done) {
           audioIteratorDone = true;
-          nextAudioSample = null;
           return null;
         }
-        const sample = nextAudioSample?.value;
-        nextAudioSample = null;
-        return sample;
+        return result.value as AudioSample;
+      };
+
+      // Helper to peek next audio sample without consuming
+      const peekNextAudioSample = async (): Promise<AudioSample | null> => {
+        if (pendingAudioSample) return pendingAudioSample;
+        if (audioIteratorDone || !audioSink) return null;
+        
+        sampleReadStartTime = performance.now();
+        // @ts-ignore - async iterator
+        const result = await audioSink.samples().next();
+        totalSampleReadTimeMs += performance.now() - sampleReadStartTime;
+        
+        if (result.done) {
+          audioIteratorDone = true;
+          return null;
+        }
+        pendingAudioSample = result.value as AudioSample;
+        return pendingAudioSample;
       };
 
       // Interleaved processing loop
@@ -646,55 +688,50 @@ export class LowLevelWebCodecsConverter implements VideoConverter {
           throw new Error('Conversion aborted');
         }
 
-        // Get next samples if we don't have them
-        const videoSample = nextVideoSample?.value ?? await getNextVideoSample();
-        const audioSample = nextAudioSample?.value ?? await getNextAudioSample();
+        // Peek at next samples to decide which to process
+        const nextVideo = await peekNextVideoSample();
+        const nextAudio = await peekNextAudioSample();
         
-        // Reset the peek buffers
-        nextVideoSample = null;
-        nextAudioSample = null;
+        // Determine which sample to process next based on timestamp
+        let videoSample: VideoSample | null = null;
+        let audioSample: AudioSample | null = null;
+        
+        if (nextVideo && (!nextAudio || nextVideo.timestamp <= nextAudio.timestamp)) {
+          videoSample = await getNextVideoSample();
+        } else if (nextAudio) {
+          audioSample = await getNextAudioSample();
+        }
 
         // Check if both are done
         if (!videoSample && !audioSample) {
           break;
         }
 
-        // Determine which sample to process next based on timestamp
-        // Process the one with the smaller timestamp first
-        const videoTimestamp = videoSample ? ((videoSample as { timestamp: number }).timestamp ?? Infinity) : Infinity;
-        const audioTimestamp = audioSample ? ((audioSample as { timestamp: number }).timestamp ?? Infinity) : Infinity;
-
-        if (videoSample && videoTimestamp <= audioTimestamp) {
-          // Process video sample
-          // @ts-ignore - VideoSample
-          const vs = videoSample;
-          
+        // Process video sample
+        if (videoSample) {
           // Update processed seconds from video sample timestamp
-          updateProcessedSeconds(vs.timestamp, vs.duration ?? (1 / detectedFrameRate));
+          updateProcessedSeconds(videoSample.timestamp, videoSample.duration ?? (1 / detectedFrameRate));
           updateProgress();
           
           // Measure video add time
           const videoAddStart = performance.now();
-          await this.videoEncoderSource.add(vs);
+          await this.videoEncoderSource.add(videoSample);
           totalVideoAddTimeMs += performance.now() - videoAddStart;
           
           videoFrameCount++;
-          vs.close();
+          videoSample.close();
         } else if (audioSample) {
           // Process audio sample
-          // @ts-ignore - AudioSample
-          const as = audioSample;
-          
           // Update processed seconds from audio sample timestamp
-          updateProcessedSeconds(as.timestamp, as.duration ?? 0.02); // ~20ms default audio frame
+          updateProcessedSeconds(audioSample.timestamp, audioSample.duration ?? 0.02); // ~20ms default audio frame
           
           // Measure audio add time
           const audioAddStart = performance.now();
-          await this.audioEncoderSource.add(as);
+          await this.audioEncoderSource.add(audioSample);
           totalAudioAddTimeMs += performance.now() - audioAddStart;
           
           audioSampleCount++;
-          as.close();
+          audioSample.close();
         }
       }
 
