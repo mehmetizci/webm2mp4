@@ -32,6 +32,17 @@ import { checkWebCodecsSupport } from './webCodecsSupport';
 // Audio bitrate constant (128 kbps AAC)
 const AUDIO_BITRATE_BPS = 128_000;
 
+// Type guard for VideoEncoderConfig bitrateMode
+function hasBitrateMode(
+  value: unknown
+): value is { bitrateMode: string } {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'bitrateMode' in value
+  );
+}
+
 // Default frame rate
 const DEFAULT_FRAMERATE = 30;
 
@@ -96,6 +107,7 @@ export interface LowLevelDebugInfo {
   encoderSupported: boolean;
   bitrateModeRequested: string;
   bitrateModeSupported: boolean;
+  actualBitrateMode: string | null;
   conversionApiUsed: boolean;
   isValid: boolean;
   usedLowLevelPipeline: boolean;
@@ -149,6 +161,7 @@ export class LowLevelWebCodecsConverter implements VideoConverter {
       encoderSupported: false,
       bitrateModeRequested: 'constant',
       bitrateModeSupported: false,
+      actualBitrateMode: null,
       conversionApiUsed: false,
       isValid: false,
       usedLowLevelPipeline: true,
@@ -392,16 +405,15 @@ export class LowLevelWebCodecsConverter implements VideoConverter {
             framerate: config.framerate,
             bitrate: config.bitrate,
             latencyMode: config.latencyMode,
-            // @ts-ignore - bitrateMode might not be in VideoEncoderConfig type
-            bitrateMode: (config as Record<string, unknown>).bitrateMode ?? 'N/A',
+            bitrateMode: hasBitrateMode(config) ? config.bitrateMode : 'N/A',
           });
           // Check if encoder returned bitrateMode - this indicates browser support
-          const returnedBitrateMode = (config as Record<string, unknown>).bitrateMode;
-          if (returnedBitrateMode !== undefined) {
-            this.debugInfo.bitrateModeSupported = returnedBitrateMode === bitrateMode;
+          if (hasBitrateMode(config)) {
+            this.debugInfo.bitrateModeSupported = config.bitrateMode === bitrateMode;
+            this.debugInfo.actualBitrateMode = config.bitrateMode;
           } else {
-            // Browser encoder did not return bitrateMode
             this.debugInfo.bitrateModeSupported = false;
+            this.debugInfo.actualBitrateMode = null;
             console.warn('[Encoder] Tarayıcı encoder config içinde bitrateMode döndürmedi');
           }
         },
