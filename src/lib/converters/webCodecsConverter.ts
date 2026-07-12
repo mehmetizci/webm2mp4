@@ -20,9 +20,11 @@ import {
   canEncodeVideo,
   canEncodeAudio,
 } from 'mediabunny';
+import { getEncoderConfig, type EncoderConfig } from './qualityConfig';
+import type { QualityPreset } from '@/types/converter';
+import type { OutputAnalysis } from './types';
 
 // Constants
-const DEFAULT_VIDEO_BITRATE = 650_000; // 650 kbps to match FFmpeg output
 const DEFAULT_FRAMERATE = 30;
 const SPEED_EMA_ALPHA = 0.3; // EMA smoothing factor
 
@@ -45,14 +47,29 @@ export interface WebCodecsDebugInfo {
   inputFormat: string | null;
   inputVideoCodec: string | null;
   inputAudioCodec: string | null;
+  inputWidth: number;
+  inputHeight: number;
   outputFormat: string;
   outputVideoCodec: string;
   outputAudioCodec: string;
+  outputWidth: number;
+  outputHeight: number;
+  targetBitrate: number;
+  actualBitrate: number | null;
   hardwareAcceleration: string;
   encodedVideoFrames: number;
   encodedAudioSamples: number;
   conversionApiUsed: boolean;
   error: string | null;
+  encoderConfig: {
+    codec: string;
+    bitrate: number;
+    framerate: number;
+    bitrateMode: string;
+    latencyMode: string;
+    hardwareAcceleration: string;
+    keyFrameInterval: number;
+  } | null;
 }
 
 export class WebCodecsConverter implements VideoConverter {
@@ -69,14 +86,21 @@ export class WebCodecsConverter implements VideoConverter {
     inputFormat: null,
     inputVideoCodec: null,
     inputAudioCodec: null,
+    inputWidth: 0,
+    inputHeight: 0,
     outputFormat: 'MP4',
     outputVideoCodec: 'H.264',
     outputAudioCodec: 'AAC',
-    hardwareAcceleration: 'no-preference',
+    outputWidth: 0,
+    outputHeight: 0,
+    targetBitrate: 0,
+    actualBitrate: null,
+    hardwareAcceleration: 'prefer-hardware',
     encodedVideoFrames: 0,
     encodedAudioSamples: 0,
     conversionApiUsed: false,
     error: null,
+    encoderConfig: null,
   };
 
   async checkSupport(): Promise<ConverterSupport> {
@@ -95,7 +119,9 @@ export class WebCodecsConverter implements VideoConverter {
 
     const {
       file,
-      bitrate = DEFAULT_VIDEO_BITRATE,
+      quality = 'standard',
+      width: targetWidth,
+      height: targetHeight,
       framerate: frameRate = DEFAULT_FRAMERATE,
       onProgress,
       onMetadata,
@@ -161,13 +187,49 @@ export class WebCodecsConverter implements VideoConverter {
       this.debugInfo.outputVideoCodec = 'H.264';
       this.debugInfo.outputAudioCodec = audioCodecSupport ? 'AAC' : 'None';
       
+      // Step 2: Calculate encoder configuration based on quality preset
+      // Use source resolution by default, or target resolution if specified
+      const outputWidth = targetWidth ?? videoWidth;
+      const outputHeight = targetHeight ?? videoHeight;
+      
+      const encoderConfig = getEncoderConfig(
+        outputWidth,
+        outputHeight,
+        frameRate,
+        quality as QualityPreset
+      );
+      
+      console.log('[WebCodecs] Encoder config:', {
+        quality,
+        input: `${videoWidth}x${videoHeight}`,
+        output: `${outputWidth}x${outputHeight}`,
+        ...encoderConfig,
+      });
+      
+      // Update debug info with encoder configuration
+      this.debugInfo.inputWidth = videoWidth;
+      this.debugInfo.inputHeight = videoHeight;
+      this.debugInfo.outputWidth = outputWidth;
+      this.debugInfo.outputHeight = outputHeight;
+      this.debugInfo.targetBitrate = encoderConfig.videoBitrate;
+      this.debugInfo.hardwareAcceleration = encoderConfig.encoder.hardwareAcceleration;
+      this.debugInfo.encoderConfig = {
+        codec: encoderConfig.encoder.codec,
+        bitrate: encoderConfig.encoder.bitrate,
+        framerate: encoderConfig.encoder.framerate,
+        bitrateMode: encoderConfig.encoder.bitrateMode,
+        latencyMode: encoderConfig.encoder.latencyMode,
+        hardwareAcceleration: encoderConfig.encoder.hardwareAcceleration,
+        keyFrameInterval: encoderConfig.encoder.keyFrameInterval,
+      };
+      
       // Report metadata IMMEDIATELY - before any other processing
       // This allows UI to show duration right away
       if (onMetadata) {
         onMetadata({
           totalDurationSeconds: inputDuration,
-          width: videoWidth,
-          height: videoHeight,
+          width: outputWidth,
+          height: outputHeight,
           frameRate: videoFrameRate,
           hasAudio: audioCodecSupport, // Assume WebM has audio, AAC will be encoded if supported
           videoCodec: 'VP8/VP9/AV1',
@@ -176,7 +238,7 @@ export class WebCodecsConverter implements VideoConverter {
         console.log('[WebCodecs] Metadata reported to UI');
       }
       
-      // Step 2: Create Mediabunny Output for MP4
+      // Step 3: Create Mediabunny Output for MP4
       this.reportProgress('initializing', 5, onProgress);
       const outputTarget = new BufferTarget();
       const output = new (await import('mediabunny')).Output({
@@ -184,25 +246,34 @@ export class WebCodecsConverter implements VideoConverter {
         format: new Mp4OutputFormat(),
       });
       
-      // Step 3: Initialize conversion with Mediabunny Conversion API
+      // Step 4: Initialize conversion with Mediabunny Conversion API
       this.reportProgress('initializing', 8, onProgress);
+      
+      // Build video options - only include width/height if target is different from source
+      const videoOptions: Record<string, unknown> = {
+        codec: encoderConfig.encoder.codec,
+        bitrate: encoderConfig.encoder.bitrate,
+        frameRate: encoderConfig.encoder.framerate,
+        hardwareAcceleration: encoderConfig.encoder.hardwareAcceleration,
+        keyFrameInterval: encoderConfig.encoder.keyFrameInterval,
+      };
+      
+      // Only add width/height if we're actually resizing
+      if (targetWidth !== undefined || targetHeight !== undefined) {
+        videoOptions.width = outputWidth;
+        videoOptions.height = outputHeight;
+        // If both dimensions are specified and different from source, require fit mode
+        if (targetWidth !== undefined && targetHeight !== undefined) {
+          videoOptions.fit = 'contain'; // Preserve aspect ratio
+        }
+      }
       
       this.conversion = await Conversion.init({
         input,
         output,
-        video: {
-          // Use source resolution automatically (no width/height to preserve aspect ratio)
-          // This prevents the "fit" parameter requirement and works correctly for vertical videos
-          frameRate,
-          codec: 'avc', // H.264
-          // Use numeric bitrate (650 kbps) to match FFmpeg's output size
-          // QUALITY_HIGH produces ~3.3 Mbps which is too large
-          bitrate: 650_000, // 650 kbps
-          hardwareAcceleration: this.preferHardware ? 'prefer-hardware' : 'no-preference',
-          keyFrameInterval: 2, // Keyframe every 2 seconds
-        },
+        video: videoOptions,
         audio: audioCodecSupport ? {
-          codec: 'aac', // AAC
+          codec: 'aac',
         } : undefined,
       });
       
@@ -211,6 +282,7 @@ export class WebCodecsConverter implements VideoConverter {
         isValid: this.conversion.isValid,
         utilizedTracks: this.conversion.utilizedTracks.length,
         discardedTracks: this.conversion.discardedTracks.length,
+        encoderBitrate: encoderConfig.encoder.bitrate,
       });
       
       if (!this.conversion.isValid) {
@@ -249,14 +321,52 @@ export class WebCodecsConverter implements VideoConverter {
         throw new Error('Conversion failed: no output buffer');
       }
       
+      // Step 7: Analyze output MP4 to get actual stats
+      let outputAnalysis: OutputAnalysis | undefined;
+      try {
+        const Mediabunny = await import('mediabunny');
+        const analysisInput = new Mediabunny.Input({
+          source: new Mediabunny.BlobSource(new Blob([outputBuffer], { type: 'video/mp4' })),
+          formats: [Mediabunny.MP4],
+        });
+        
+        const outputFormat = await analysisInput.getFormat();
+        const videoTrack = await analysisInput.getPrimaryVideoTrack();
+        const audioTrack = await analysisInput.getAudioTrack().catch(() => null);
+        
+        if (videoTrack) {
+          const trackInfo = await videoTrack.getTrackInfo();
+          const videoBitrate = trackInfo.bitrate ?? this.debugInfo.targetBitrate;
+          
+          outputAnalysis = {
+            videoCodec: trackInfo.codec ?? 'H.264',
+            audioCodec: audioTrack ? 'AAC' : null,
+            width: trackInfo.width ?? this.debugInfo.outputWidth,
+            height: trackInfo.height ?? this.debugInfo.outputHeight,
+            frameRate: trackInfo.frameRate ?? frameRate,
+            duration: this.inputDuration,
+            averageVideoBitrate: videoBitrate,
+            averageAudioBitrate: audioTrack ? 128_000 : null,
+            container: 'MP4',
+            fileSizeBytes: outputBuffer.byteLength,
+          };
+          
+          // Update debug info with actual bitrate
+          this.debugInfo.actualBitrate = videoBitrate;
+          
+          console.log('[WebCodecs] Output analysis:', outputAnalysis);
+        }
+      } catch (analysisError) {
+        console.warn('[WebCodecs] Could not analyze output:', analysisError);
+      }
+      
       // Calculate stats
       const encodeTime = (Date.now() - this.startTime) / 1000;
       const compressionRatio = this.inputDuration > 0 && file.size > 0
         ? Math.round(((file.size - outputBuffer.byteLength) / file.size) * 100)
         : 0;
-      const videoBitrate = this.inputDuration > 0
-        ? (outputBuffer.byteLength * 8 / this.inputDuration)
-        : null;
+      const videoBitrate = outputAnalysis?.averageVideoBitrate ?? 
+        (this.inputDuration > 0 ? (outputBuffer.byteLength * 8 / this.inputDuration) : null);
       
       // hasAudio depends only on AAC encoding support
       // (WebM typically has Opus audio, we encode to AAC if supported)
@@ -269,12 +379,13 @@ export class WebCodecsConverter implements VideoConverter {
         inputSize: file.size,
         duration: this.inputDuration,
         videoBitrate: videoBitrate ?? null,
-        audioBitrate: hasAudio ? 128 : null,
+        audioBitrate: outputAnalysis?.averageAudioBitrate ?? (hasAudio ? 128_000 : null),
         compressionRatio,
         encodeTime,
         averageSpeed: encodeTime > 0 ? this.inputDuration / encodeTime : null,
         engine: 'webcodecs',
         hasAudio,
+        outputAnalysis,
       };
       
       this.reportProgress('complete', 100, onProgress);
@@ -322,14 +433,21 @@ export class WebCodecsConverter implements VideoConverter {
       inputFormat: null,
       inputVideoCodec: null,
       inputAudioCodec: null,
+      inputWidth: 0,
+      inputHeight: 0,
       outputFormat: 'MP4',
       outputVideoCodec: 'H.264',
       outputAudioCodec: 'AAC',
-      hardwareAcceleration: 'no-preference',
+      outputWidth: 0,
+      outputHeight: 0,
+      targetBitrate: 0,
+      actualBitrate: null,
+      hardwareAcceleration: 'prefer-hardware',
       encodedVideoFrames: 0,
       encodedAudioSamples: 0,
       conversionApiUsed: false,
       error: null,
+      encoderConfig: null,
     };
   }
 

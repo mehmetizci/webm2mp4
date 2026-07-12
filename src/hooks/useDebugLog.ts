@@ -69,6 +69,19 @@ export interface ConversionDebugInfo {
   // Encoding stats
   encodeTime: number | null;
   averageSpeed: number | null;
+  // WebCodecs encoder config (from actual encoder settings)
+  webCodecsEncoderConfig: {
+    codec: string;
+    targetBitrate: number;
+    framerate: number;
+    bitrateMode: string;
+    latencyMode: string;
+    hardwareAcceleration: string;
+    keyFrameInterval: number;
+  } | null;
+  webCodecsActualBitrate: number | null;
+  webCodecsOutputWidth: number | null;
+  webCodecsOutputHeight: number | null;
   // Cleanup status
   cleanupStatus: 'idle' | 'cleaning' | 'completed' | 'warning' | 'error';
   cleanupValidation: {
@@ -305,6 +318,11 @@ const initialDebugInfo: ConversionDebugInfo = {
   // Encoding stats
   encodeTime: null,
   averageSpeed: null,
+  // WebCodecs encoder config
+  webCodecsEncoderConfig: null,
+  webCodecsActualBitrate: null,
+  webCodecsOutputWidth: null,
+  webCodecsOutputHeight: null,
   // Cleanup status
   cleanupStatus: 'idle',
   cleanupValidation: null,

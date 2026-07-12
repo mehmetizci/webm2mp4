@@ -365,6 +365,47 @@ export function DebugPanel({ debugInfo, isVisible, webCodecsDetection, selectedE
             </DebugSection>
           )}
 
+          {/* Encoder Settings - Show actual encoder config from WebCodecs */}
+          {actualEngine === 'webcodecs' && debugInfo.webCodecsEncoderConfig && (
+            <DebugSection title="Encoder Ayarları">
+              <DebugRow 
+                label="Codec" 
+                value={debugInfo.webCodecsEncoderConfig.codec?.toUpperCase() || 'H.264'} 
+              />
+              <DebugRow 
+                label="Hedef Bitrate" 
+                value={debugInfo.webCodecsEncoderConfig.targetBitrate 
+                  ? `${(debugInfo.webCodecsEncoderConfig.targetBitrate / 1000).toFixed(0)} kbps` 
+                  : '-'} 
+              />
+              {debugInfo.webCodecsActualBitrate && (
+                <DebugRow 
+                  label="Gerçek Bitrate" 
+                  value={`${(debugInfo.webCodecsActualBitrate / 1000).toFixed(0)} kbps`} 
+                  status="completed"
+                />
+              )}
+              {debugInfo.webCodecsOutputWidth && debugInfo.webCodecsOutputHeight && (
+                <DebugRow 
+                  label="Çözünürlük" 
+                  value={`${debugInfo.webCodecsOutputWidth}x${debugInfo.webCodecsOutputHeight}`} 
+                />
+              )}
+              <DebugRow 
+                label="FPS" 
+                value={debugInfo.webCodecsEncoderConfig.framerate?.toString() || '30'} 
+              />
+              <DebugRow 
+                label="Bitrate Mode" 
+                value={debugInfo.webCodecsEncoderConfig.bitrateMode?.toUpperCase() || 'VBR'} 
+              />
+              <DebugRow 
+                label="Hardware" 
+                value={debugInfo.webCodecsEncoderConfig.hardwareAcceleration || 'prefer-hardware'} 
+              />
+            </DebugSection>
+          )}
+
           {/* Conversion Status - only show FFmpeg details when using FFmpeg */}
           {actualEngine !== 'webcodecs' && (
             <DebugSection title="FFmpeg Durumu">

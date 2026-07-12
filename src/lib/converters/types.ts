@@ -1,6 +1,7 @@
 // Conversion Engine Types
 
 import type { WebCodecsCapabilities } from './webCodecsSupport';
+import type { QualityPreset } from '@/types/converter';
 
 export type ConversionEngine = 'webcodecs' | 'ffmpeg-wasm';
 
@@ -47,12 +48,14 @@ export interface ConversionProgress {
 
 export interface ConvertOptions {
   file: File;
+  // Quality preset - determines bitrate based on resolution
+  quality?: QualityPreset;
   // Resolution options - optional, uses source resolution if not provided
   width?: number;
   height?: number;
   // Fit mode for Mediabunny - required when width and height are both provided
   fit?: 'fill' | 'contain' | 'cover';
-  // Encoding options
+  // Encoding options (overrides quality preset if provided)
   bitrate?: number;
   framerate?: number;
   // Callbacks
@@ -74,6 +77,22 @@ export interface ConversionResult {
   averageSpeed: number | null;
   engine: ConversionEngine;
   hasAudio: boolean;
+  // Output analysis from the actual MP4 file
+  outputAnalysis?: OutputAnalysis;
+}
+
+// Detailed analysis of the output MP4 file
+export interface OutputAnalysis {
+  videoCodec: string;
+  audioCodec: string | null;
+  width: number;
+  height: number;
+  frameRate: number;
+  duration: number;
+  averageVideoBitrate: number;
+  averageAudioBitrate: number | null;
+  container: string;
+  fileSizeBytes: number;
 }
 
 export interface ConverterSupport {

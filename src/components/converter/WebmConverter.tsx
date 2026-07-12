@@ -563,7 +563,7 @@ export function WebmConverter() {
           
           const result = await webCodecsConverter.convert({
             file: selectedFile,
-            // Use default bitrate (650 kbps) - don't override
+            quality: settings.quality,
             framerate: 30,
             onProgress: (progress) => {
               console.log('[WebCodecs] Progress:', progress);
@@ -614,11 +614,40 @@ export function WebmConverter() {
           
           console.log('[WebCodecs] Conversion result:', result);
           
-          // Calculate bitrates from actual output
+          // Get encoder debug info from converter
+          const encoderDebugInfo = webCodecsConverter.getDebugInfo();
+          
+          // Calculate bitrates from actual output (or from output analysis if available)
           const videoDuration = result.duration;
-          const videoBitrate = videoDuration > 0 ? (result.fileSize * 8 / videoDuration / 1000) : null;
-          const audioBitrate = result.hasAudio ? (result.audioBitrate ?? 128) : 0;
-          const totalBitrate = videoBitrate !== null ? videoBitrate + audioBitrate : null;
+          const actualVideoBitrate = result.outputAnalysis?.averageVideoBitrate 
+            ? (result.outputAnalysis.averageVideoBitrate / 1000) 
+            : (videoDuration > 0 ? (result.fileSize * 8 / videoDuration / 1000) : null);
+          const audioBitrate = result.outputAnalysis?.averageAudioBitrate 
+            ? (result.outputAnalysis.averageAudioBitrate / 1000) 
+            : (result.hasAudio ? (result.audioBitrate ?? 128) : 0);
+          const totalBitrate = actualVideoBitrate !== null ? actualVideoBitrate + audioBitrate : null;
+          
+          // Update debug info with encoder configuration
+          updateDebugInfo({
+            lastProgressValue: 100,
+            webCodecsEncoderConfig: encoderDebugInfo.encoderConfig ? {
+              codec: encoderDebugInfo.encoderConfig.codec,
+              targetBitrate: encoderDebugInfo.encoderConfig.bitrate,
+              framerate: encoderDebugInfo.encoderConfig.framerate,
+              bitrateMode: encoderDebugInfo.encoderConfig.bitrateMode,
+              latencyMode: encoderDebugInfo.encoderConfig.latencyMode,
+              hardwareAcceleration: encoderDebugInfo.encoderConfig.hardwareAcceleration,
+              keyFrameInterval: encoderDebugInfo.encoderConfig.keyFrameInterval,
+            } : null,
+            webCodecsActualBitrate: result.outputAnalysis?.averageVideoBitrate 
+              ? result.outputAnalysis.averageVideoBitrate 
+              : (actualVideoBitrate !== null ? actualVideoBitrate * 1000 : null),
+            webCodecsOutputWidth: encoderDebugInfo.outputWidth || null,
+            webCodecsOutputHeight: encoderDebugInfo.outputHeight || null,
+            videoBitrate: actualVideoBitrate !== null ? actualVideoBitrate * 1000 : null,
+            audioBitrate: audioBitrate * 1000,
+            totalBitrate: totalBitrate !== null ? totalBitrate * 1000 : null,
+          });
           
           // Convert to our result format
           const convertResult = {
@@ -630,9 +659,9 @@ export function WebmConverter() {
             inputSize: result.inputSize,
             outputSize: result.fileSize,
             compressionRatio: result.compressionRatio,
-            videoBitrate: videoBitrate ?? undefined,
-            audioBitrate: result.hasAudio ? audioBitrate : 0,
-            totalBitrate: totalBitrate ?? undefined,
+            videoBitrate: actualVideoBitrate !== null ? actualVideoBitrate * 1000 : undefined,
+            audioBitrate: result.hasAudio ? audioBitrate * 1000 : 0,
+            totalBitrate: totalBitrate !== null ? totalBitrate * 1000 : undefined,
             encodeTime: result.encodeTime,
             averageSpeed: result.averageSpeed ?? undefined,
             hasAudio: result.hasAudio,
@@ -640,7 +669,6 @@ export function WebmConverter() {
           };
           
           // Force progress to 100 on completion
-          updateDebugInfo({ lastProgressValue: 100 });
           
           setResult(convertResult);
           setStage('complete');
