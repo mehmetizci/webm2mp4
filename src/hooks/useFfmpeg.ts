@@ -581,11 +581,14 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
       metadataSource: hasHtml5MetadataRef.current ? 'html5' : null,
     });
 
-    // Get quality preset settings
+    // Get quality preset settings (matching WebCodecs qualityConfig values)
+    // CRF values: lower = better quality, higher = worse quality
+    // maxrate values are in kbps to match FFmpeg's expected format
     const qualitySettingsMap: Record<QualityPreset, { crf: number; maxrate: number }> = {
-      standard: { crf: 28, maxrate: 650 },
-      high: { crf: 23, maxrate: 800 },
-      small: { crf: 28, maxrate: 400 },
+      // Consistent with qualityConfig.ts for 720p video
+      small: { crf: 32, maxrate: 500 },    // ~400-500 kbps target
+      standard: { crf: 26, maxrate: 1200 }, // ~1000-1200 kbps target
+      high: { crf: 20, maxrate: 2000 },    // ~1800-2000 kbps target
     };
     const { crf, maxrate } = qualitySettingsMap[quality];
 
