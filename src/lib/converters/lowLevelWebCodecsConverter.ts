@@ -96,7 +96,12 @@ export interface LowLevelDebugInfo {
   inputFormat: string;
   inputWidth: number;
   inputHeight: number;
-  inputVideoCodec: string | null;
+  inputFrameRate: number | null;
+  inputVideoCodec: string | null;      // Container codec from Mediabunny (VP8, VP9, AV1, etc.)
+  inputVideoCodecString: string | null; // WebCodecs codec string used for decoder test (vp8, vp09, av01, etc.)
+  inputDecoderApiAvailable: boolean;
+  inputDecoderStatus: 'untested' | 'supported' | 'unsupported' | 'error' | null;
+  inputDecoderSupportError: string | null;
   inputAudioCodec: string | null;
   outputWidth: number;
   outputHeight: number;
@@ -111,7 +116,8 @@ export interface LowLevelDebugInfo {
   hardwareMode: string;
   qualityPreset: string;
   encoderConfig: {
-    codec: string;
+    codec: string;           // Actual codec string from encoder (e.g., avc1.64001f)
+    codecProfile: string | null; // Profile name (High, Main, Baseline)
     bitrate: number;
     framerate: number;
     hardwareAcceleration: string;
@@ -164,7 +170,12 @@ export class LowLevelWebCodecsConverter implements VideoConverter {
       inputFormat: '',
       inputWidth: 0,
       inputHeight: 0,
+      inputFrameRate: null,
       inputVideoCodec: null,
+      inputVideoCodecString: null,
+      inputDecoderApiAvailable: typeof VideoDecoder !== 'undefined',
+      inputDecoderStatus: null,
+      inputDecoderSupportError: null,
       inputAudioCodec: null,
       outputWidth: 0,
       outputHeight: 0,
@@ -200,6 +211,7 @@ export class LowLevelWebCodecsConverter implements VideoConverter {
   private async validateDecoderSupport(inputVideoCodec: string | null): Promise<{
     codecString: string;
     status: 'supported' | 'unsupported' | 'untested' | 'error';
+    errorMessage?: string;
   }> {
     // Default response
     const defaultResult = {
@@ -452,13 +464,17 @@ export class LowLevelWebCodecsConverter implements VideoConverter {
       const decoderResult = await this.validateDecoderSupport(inputVideoCodec);
       
       // Store decoder info in debugInfo (for external use)
-      this.debugInfo.inputVideoCodec = inputVideoCodec ?? 'unknown';
+      this.debugInfo.inputVideoCodecString = decoderResult.codecString;
+      this.debugInfo.inputDecoderStatus = decoderResult.status;
+      this.debugInfo.inputDecoderSupportError = decoderResult.errorMessage || null;
       
       // Log decoder validation result
       if (decoderResult.status === 'supported') {
         console.log(`[Decoder] Validation result: ${decoderResult.codecString} - Supported`);
       } else if (decoderResult.status === 'unsupported') {
         console.error(`[Decoder] Validation result: ${decoderResult.codecString} - NOT SUPPORTED`);
+      } else if (decoderResult.status === 'error') {
+        console.error(`[Decoder] Validation result: ${decoderResult.codecString} - Error: ${decoderResult.errorMessage}`);
       }
 
       // Read audio codec if available
@@ -497,12 +513,16 @@ export class LowLevelWebCodecsConverter implements VideoConverter {
         'Input Resolution': `${videoWidth}x${videoHeight}`,
         'Orientation': videoHeight > videoWidth ? 'vertical' : 'horizontal',
         'Input Video Codec': inputVideoCodec ?? 'unknown',
+        'WebCodecs Codec String': decoderResult.codecString,
         'Input Audio Codec': inputAudioCodec ?? 'none',
         'Has Audio': hasInputAudio ? 'Yes' : 'No',
         'Input Duration': `${inputDuration.toFixed(1)}s`,
         'Detected Frame Rate': `${detectedFrameRate} fps`,
       });
       console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      
+      // Store input frame rate in debugInfo
+      this.debugInfo.inputFrameRate = detectedFrameRate;
 
       // Check codec support
       const videoCodecSupport = await canEncodeVideo('avc');
@@ -565,6 +585,23 @@ export class LowLevelWebCodecsConverter implements VideoConverter {
             latencyMode: config.latencyMode,
             bitrateMode: hasBitrateMode(config) ? config.bitrateMode : 'N/A',
           });
+          
+          // Update encoder config with actual codec string from encoder
+          if (this.debugInfo.encoderConfig) {
+            this.debugInfo.encoderConfig.codec = config.codec;
+            // Extract profile from codec string (e.g., avc1.64001f -> High)
+            if (config.codec.startsWith('avc1.')) {
+              const codecSuffix = config.codec.substring(5); // e.g., 64001f
+              if (codecSuffix === '64001f') {
+                this.debugInfo.encoderConfig.codecProfile = 'High';
+              } else if (codecSuffix === '4D401f') {
+                this.debugInfo.encoderConfig.codecProfile = 'Main';
+              } else if (codecSuffix === '42E01e') {
+                this.debugInfo.encoderConfig.codecProfile = 'Baseline';
+              }
+            }
+          }
+          
           // Check if encoder returned bitrateMode - this indicates browser support
           if (hasBitrateMode(config)) {
             this.debugInfo.bitrateModeSupported = config.bitrateMode === bitrateMode;
@@ -606,8 +643,10 @@ export class LowLevelWebCodecsConverter implements VideoConverter {
       console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 
       // Store encoder config for debug
+      // Note: actual codec string will be updated in onEncoderConfig callback
       this.debugInfo.encoderConfig = {
-        codec: 'avc',
+        codec: 'avc', // Will be updated with actual codec string from encoder
+        codecProfile: null, // Will be updated with actual profile name from encoder
         bitrate: targetVideoBitrateBps,
         framerate: detectedFrameRate,
         hardwareAcceleration: hardwareMode,

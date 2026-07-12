@@ -235,12 +235,12 @@ export function DebugPanel({ debugInfo, isVisible, webCodecsDetection, selectedE
             {/* Input video codec info from Mediabunny */}
             <DebugRow 
               label="Container Codec" 
-              value={debugInfo.inputVideoCodec || '-'} 
+              value={debugInfo.inputVideoCodec || 'Tespit edilemedi'} 
               status={debugInfo.inputVideoCodec ? 'completed' : 'idle'}
             />
             <DebugRow 
               label="WebCodecs Codec String" 
-              value={debugInfo.inputVideoCodecString || '-'} 
+              value={debugInfo.inputVideoCodecString || 'Tespit edilemedi'} 
               status={debugInfo.inputVideoCodecString ? 'completed' : 'idle'}
             />
             <DebugRow 
@@ -251,17 +251,18 @@ export function DebugPanel({ debugInfo, isVisible, webCodecsDetection, selectedE
             {/* Decoder API availability */}
             <DebugRow 
               label="Decoder API" 
-              value={detection?.capabilities?.videoDecoder ? 'Mevcut' : 'Yok'} 
-              status={detection?.capabilities?.videoDecoder ? 'completed' : 'error'}
+              value={debugInfo.inputDecoderApiAvailable ? 'Mevcut' : 'Yok'} 
+              status={debugInfo.inputDecoderApiAvailable ? 'completed' : 'error'}
             />
             {/* Decoder support status - only show if actually tested */}
-            {debugInfo.inputDecoderStatus && debugInfo.inputDecoderStatus !== 'untested' && (
+            {debugInfo.inputDecoderStatus && (
               <DebugRow 
                 label="Decoder Test Sonucu" 
                 value={
                   debugInfo.inputDecoderStatus === 'supported' ? 'Destekleniyor' :
                   debugInfo.inputDecoderStatus === 'unsupported' ? 'Desteklenmiyor' :
-                  debugInfo.inputDecoderStatus === 'error' ? 'Test Hatası' : '-'
+                  debugInfo.inputDecoderStatus === 'error' ? 'Test Hatası' :
+                  debugInfo.inputDecoderStatus === 'untested' ? 'Test edilmedi' : '-'
                 }
                 status={
                   debugInfo.inputDecoderStatus === 'supported' ? 'completed' :
@@ -332,11 +333,12 @@ export function DebugPanel({ debugInfo, isVisible, webCodecsDetection, selectedE
             <DebugSection title="Giriş Video Bilgileri">
               <DebugRow 
                 label="Çözünürlük" 
-                value={debugInfo.inputWidth && debugInfo.inputHeight ? `${debugInfo.inputWidth}x${debugInfo.inputHeight}` : '-'} 
+                value={debugInfo.inputWidth && debugInfo.inputHeight ? `${debugInfo.inputWidth}x${debugInfo.inputHeight}` : 'Tespit edilemedi'} 
               />
               <DebugRow 
                 label="FPS" 
-                value={debugInfo.inputFrameRate ? `${debugInfo.inputFrameRate}` : '-'} 
+                value={debugInfo.inputFrameRate ? `${debugInfo.inputFrameRate}` : 'Tespit edilemedi'} 
+                status={debugInfo.inputFrameRate ? 'completed' : 'idle'}
               />
             </DebugSection>
           )}
@@ -405,18 +407,30 @@ export function DebugPanel({ debugInfo, isVisible, webCodecsDetection, selectedE
             <DebugSection title="Çıkış Video Bilgileri">
               <DebugRow 
                 label="Codec" 
-                value={debugInfo.webCodecsEncoderConfig.codec?.toUpperCase() || 'H.264'} 
+                value="H.264 / AVC" 
                 status="completed"
               />
+              <DebugRow 
+                label="Codec String" 
+                value={debugInfo.webCodecsEncoderConfig.codec || 'Tespit edilemedi'} 
+                status={debugInfo.webCodecsEncoderConfig.codec !== 'avc' ? 'completed' : 'idle'}
+              />
+              {debugInfo.webCodecsEncoderConfig.codecProfile && (
+                <DebugRow 
+                  label="Profil" 
+                  value={debugInfo.webCodecsEncoderConfig.codecProfile} 
+                  status="completed"
+                />
+              )}
               <DebugRow 
                 label="Çözünürlük" 
                 value={debugInfo.webCodecsOutputWidth && debugInfo.webCodecsOutputHeight 
                   ? `${debugInfo.webCodecsOutputWidth}x${debugInfo.webCodecsOutputHeight}` 
-                  : '-'} 
+                  : 'Tespit edilemedi'} 
               />
               <DebugRow 
                 label="FPS" 
-                value={debugInfo.webCodecsEncoderConfig.framerate?.toString() || '30'} 
+                value={debugInfo.webCodecsEncoderConfig.framerate?.toString() || 'Tespit edilemedi'} 
               />
               <DebugRow 
                 label="Kalite" 
@@ -426,7 +440,7 @@ export function DebugPanel({ debugInfo, isVisible, webCodecsDetection, selectedE
                 label="Hedef Bitrate" 
                 value={debugInfo.webCodecsEncoderConfig.targetBitrate 
                   ? formatBitrate(debugInfo.webCodecsEncoderConfig.targetBitrate) 
-                  : '-'} 
+                  : 'Tespit edilemedi'} 
               />
               {debugInfo.webCodecsActualBitrate && (
                 <DebugRow 

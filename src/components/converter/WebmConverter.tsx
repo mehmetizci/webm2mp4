@@ -677,6 +677,7 @@ export function WebmConverter() {
             lastProgressValue: 100,
             webCodecsEncoderConfig: encoderDebugInfo.encoderConfig ? {
               codec: encoderDebugInfo.encoderConfig.codec,
+              codecProfile: encoderDebugInfo.encoderConfig.codecProfile,
               targetBitrate: encoderDebugInfo.encoderConfig.bitrate,
               framerate: encoderDebugInfo.encoderConfig.framerate,
               hardwareAcceleration: encoderDebugInfo.encoderConfig.hardwareAcceleration,
@@ -699,12 +700,16 @@ export function WebmConverter() {
             videoBitrate: videoBitrateBps,
             audioBitrate: audioBitrateBps,
             totalBitrate: totalBitrateBps,
-            // Input video info from encoder
+            // Input video info from encoder (real runtime values)
             inputVideoCodec: encoderDebugInfo.inputVideoCodec,
+            inputVideoCodecString: encoderDebugInfo.inputVideoCodecString,
             inputAudioCodec: encoderDebugInfo.inputAudioCodec,
             inputWidth: encoderDebugInfo.inputWidth || null,
             inputHeight: encoderDebugInfo.inputHeight || null,
-            inputFrameRate: null, // Will be populated from metadata if available
+            inputFrameRate: encoderDebugInfo.inputFrameRate,
+            inputDecoderApiAvailable: encoderDebugInfo.inputDecoderApiAvailable,
+            inputDecoderStatus: encoderDebugInfo.inputDecoderStatus,
+            inputDecoderSupportError: encoderDebugInfo.inputDecoderSupportError,
           });
           
           // Convert to our result format (values in bps)

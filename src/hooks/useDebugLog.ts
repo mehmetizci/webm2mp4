@@ -36,17 +36,16 @@ export interface ConversionDebugInfo {
   webCodecsDetectionTimeMs: number | null;
   webCodecsTimedOut: boolean | null;
   webCodecsCodecResults: Array<{ codec: string; profile: string; supported: boolean | null }>;
-  // Input video codec info (from Mediabunny)
-  inputVideoCodec: string | null;
+  // Input video codec info (from Mediabunny and actual decoder tests)
+  inputVideoCodec: string | null;          // Container codec from Mediabunny (VP8, VP9, AV1)
+  inputVideoCodecString: string | null;      // WebCodecs codec string for decoder test (vp8, vp09, av01)
   inputAudioCodec: string | null;
   inputWidth: number | null;
   inputHeight: number | null;
-  inputFrameRate: number | null;
-  inputVideoCodecString: string | null;
-  inputDecoderSupported: boolean | null;
-  inputDecoderStatus: 'untested' | 'supported' | 'unsupported' | 'error' | null;
-  // Actual decoder used
-  actualDecoderUsed: string | null;
+  inputFrameRate: number | null;           // Actual FPS detected from packet stats
+  inputDecoderApiAvailable: boolean | null; // VideoDecoder API available in browser
+  inputDecoderStatus: 'untested' | 'supported' | 'unsupported' | 'error' | null; // Decoder support test result
+  inputDecoderSupportError: string | null;  // Error message if decoder test failed
   // FFmpeg load status
   ffmpegLoadStatus: 'idle' | 'loading' | 'loaded' | 'error';
   coreJsLoadStatus: 'idle' | 'loading' | 'loaded' | 'error';
@@ -82,7 +81,8 @@ export interface ConversionDebugInfo {
   averageSpeed: number | null;
   // WebCodecs encoder config (from actual encoder settings)
   webCodecsEncoderConfig: {
-    codec: string;
+    codec: string;           // Actual codec string from encoder (e.g., avc1.64001f)
+    codecProfile: string | null; // Profile name (High, Main, Baseline)
     targetBitrate: number;
     framerate: number;
     hardwareAcceleration: string;
@@ -306,16 +306,16 @@ const initialDebugInfo: ConversionDebugInfo = {
   webCodecsDetectionTimeMs: null,
   webCodecsTimedOut: null,
   webCodecsCodecResults: [],
-  // Input video codec info (from Mediabunny)
+  // Input video codec info (from Mediabunny and decoder tests)
   inputVideoCodec: null,
+  inputVideoCodecString: null,
   inputAudioCodec: null,
   inputWidth: null,
   inputHeight: null,
   inputFrameRate: null,
-  inputVideoCodecString: null,
-  inputDecoderSupported: null,
+  inputDecoderApiAvailable: null,
   inputDecoderStatus: null,
-  actualDecoderUsed: null,
+  inputDecoderSupportError: null,
   // FFmpeg load status
   ffmpegLoadStatus: 'idle',
   coreJsLoadStatus: 'idle',
