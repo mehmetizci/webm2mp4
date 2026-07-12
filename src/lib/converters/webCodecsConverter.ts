@@ -425,13 +425,13 @@ export class WebCodecsConverter implements VideoConverter {
           console.log(`File Size: ${(outputAnalysis.fileSizeBytes / 1024 / 1024).toFixed(2)} MB`);
           console.log('────────────────────────────────────────');
           console.log(`Target Video Bitrate: ${(this.debugInfo.targetBitrate / 1000).toFixed(0)} kbps`);
-          console.log(`Actual Video Bitrate: ${(actualVideoBitrate / 1000).toFixed(0)} kbps`);
+          console.log(`Actual Video Bitrate: ${(actualVideoBitrateBps / 1000).toFixed(0)} kbps`);
           console.log(`Bitrate Difference: ${bitrateDifference > 0 ? '+' : ''}${bitrateDifference.toFixed(1)}%`);
           console.log(`Audio Bitrate: ${outputAnalysis.averageAudioBitrate ? (outputAnalysis.averageAudioBitrate / 1000).toFixed(0) : 0} kbps`);
           console.log('Container: MP4');
           
           if (Math.abs(bitrateDifference) > 15) {
-            console.warn(`⚠️ Bitrate difference is > 15%! Expected ~${(this.debugInfo.targetBitrate / 1000).toFixed(0)} kbps, got ${(actualVideoBitrate / 1000).toFixed(0)} kbps`);
+            console.warn(`⚠️ Bitrate difference is > 15%! Expected ~${(this.debugInfo.targetBitrate / 1000).toFixed(0)} kbps, got ${(actualVideoBitrateBps / 1000).toFixed(0)} kbps`);
           } else {
             console.log('✅ Bitrate is within acceptable range (< 15% difference)');
           }
