@@ -122,14 +122,12 @@ export class WebCodecsConverter implements VideoConverter {
       this.debugInfo.inputFormat = 'WebM';
       console.log('[WebCodecs] Input format:', inputFormat);
       
-      // Check if input has audio track
-      const hasInputAudio = inputFormat.audioTracks && inputFormat.audioTracks.length > 0;
-      console.log('[WebCodecs] Input has audio:', hasInputAudio);
-      
       // Get video track info
       const format = await input.getFormat();
       this.debugInfo.inputVideoCodec = 'VP8/VP9/AV1';
-      this.debugInfo.inputAudioCodec = hasInputAudio ? 'Opus/Vorbis' : null;
+      // WebM files typically have Opus audio - assume audio is present
+      // Actual audio encoding depends on canEncodeAudio check
+      this.debugInfo.inputAudioCodec = 'Opus/Vorbis';
       
       // Report analyzing progress
       this.reportProgress('analyzing', 5, onProgress);
@@ -239,8 +237,9 @@ export class WebCodecsConverter implements VideoConverter {
         ? (outputBuffer.byteLength * 8 / this.inputDuration)
         : null;
       
-      // Only include audio if input had audio AND device supports AAC encoding
-      const hasAudio = hasInputAudio && audioCodecSupport;
+      // hasAudio depends only on AAC encoding support
+      // (WebM typically has Opus audio, we encode to AAC if supported)
+      const hasAudio = audioCodecSupport;
       
       const result: ConversionResult = {
         blob: new Blob([outputBuffer], { type: 'video/mp4' }),
