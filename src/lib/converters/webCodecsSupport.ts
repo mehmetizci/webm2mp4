@@ -568,7 +568,8 @@ export async function testEncoderConfig(
 }
 
 // Find the best encoder config for a given resolution/bitrate
-// Priority: Baseline(prefer-hardware) > Main(prefer-hardware) > High(prefer-hardware) > no-preference variants
+// Priority order ensures High+no-preference (known working config) is always tried
+// Also tests prefer-hardware variants first, but falls back to no-preference
 export async function findBestEncoderConfig(
   width: number,
   height: number,
@@ -580,38 +581,50 @@ export async function findBestEncoderConfig(
   hardwareAcceleration: 'prefer-hardware' | 'no-preference';
   bitrateMode: 'constant' | 'variable';
 }> {
-  // Profile priority: Baseline is usually fastest on mobile hardware
-  const profiles: { codec: string; profile: H264Profile }[] = [
-    { codec: 'avc1.42E01e', profile: 'Baseline' },
-    { codec: 'avc1.4D401f', profile: 'Main' },
-    { codec: 'avc1.64001f', profile: 'High' },
+  // Priority order: Try prefer-hardware first (faster if supported), then no-preference
+  // Within each HW mode, try profiles in order: High (most compatible), Main, Baseline
+  // This ensures High+no-preference (known working config) is always tested
+  const priorityOrder: Array<{
+    codec: string;
+    profile: string;
+    hwMode: 'prefer-hardware' | 'no-preference';
+  }> = [
+    // First try prefer-hardware variants (faster if supported)
+    { codec: 'avc1.64001f', profile: 'High', hwMode: 'prefer-hardware' },
+    { codec: 'avc1.4D401f', profile: 'Main', hwMode: 'prefer-hardware' },
+    { codec: 'avc1.42E01e', profile: 'Baseline', hwMode: 'prefer-hardware' },
+    // Then try no-preference variants (more compatible)
+    { codec: 'avc1.64001f', profile: 'High', hwMode: 'no-preference' },
+    { codec: 'avc1.4D401f', profile: 'Main', hwMode: 'no-preference' },
+    { codec: 'avc1.42E01e', profile: 'Baseline', hwMode: 'no-preference' },
   ];
 
-  // Hardware acceleration priority
-  const hwModes: ('prefer-hardware' | 'no-preference')[] = ['prefer-hardware', 'no-preference'];
-
-  // Test all combinations in priority order
-  for (const { codec } of profiles) {
-    for (const hwMode of hwModes) {
-      const result = await testEncoderConfig(codec, width, height, framerate, bitrate, hwMode);
-      if (result.supported) {
-        log(`Best config found: ${codec} + ${hwMode}`);
-        
-        // Now test bitrate mode
-        if (preferVariableBitrate) {
-          const varResult = await testBitrateMode(codec, width, height, framerate, bitrate, hwMode, 'variable');
-          if (varResult.supported) {
-            return { codec, hardwareAcceleration: hwMode, bitrateMode: 'variable' };
-          }
+  // Test configs in priority order
+  for (const { codec, profile, hwMode } of priorityOrder) {
+    log(`Testing config: ${profile}+${hwMode} (${codec})`);
+    
+    const result = await testEncoderConfig(codec, width, height, framerate, bitrate, hwMode);
+    
+    if (result.supported) {
+      log(`Config supported: ${profile}+${hwMode}`);
+      
+      // Test bitrate mode if requested
+      if (preferVariableBitrate) {
+        const varResult = await testBitrateMode(codec, width, height, framerate, bitrate, hwMode, 'variable');
+        if (varResult.supported) {
+          return { codec, hardwareAcceleration: hwMode, bitrateMode: 'variable' };
         }
-        
-        return { codec, hardwareAcceleration: hwMode, bitrateMode: 'constant' };
       }
+      
+      return { codec, hardwareAcceleration: hwMode, bitrateMode: 'constant' };
+    } else {
+      log(`Config NOT supported: ${profile}+${hwMode}`);
     }
   }
 
-  // Fallback to default
-  log('No optimized config found, using defaults');
+  // Fallback to known working config (High + no-preference + constant)
+  // This should always work on devices with WebCodecs support
+  log('No optimized config found, using known working fallback: High+no-preference+constant');
   return {
     codec: 'avc1.64001f',
     hardwareAcceleration: 'no-preference',
