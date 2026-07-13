@@ -612,11 +612,15 @@ export async function findBestEncoderConfig(
       if (preferVariableBitrate) {
         const varResult = await testBitrateMode(codec, width, height, framerate, bitrate, hwMode, 'variable');
         if (varResult.supported) {
-          return { codec, hardwareAcceleration: hwMode, bitrateMode: 'variable' };
+          const finalConfig = { codec, hardwareAcceleration: hwMode, bitrateMode: 'variable' as const };
+          log(`[ENCODER_CONFIG_STEP_1] findBestEncoderConfig() returning: codec=${finalConfig.codec}, hardwareAcceleration=${finalConfig.hardwareAcceleration}, bitrateMode=${finalConfig.bitrateMode}, bitrate=${bitrate}, width=${width}, height=${height}, framerate=${framerate}`);
+          return finalConfig;
         }
       }
       
-      return { codec, hardwareAcceleration: hwMode, bitrateMode: 'constant' };
+      const finalConfig = { codec, hardwareAcceleration: hwMode, bitrateMode: 'constant' as const };
+      log(`[ENCODER_CONFIG_STEP_1] findBestEncoderConfig() returning: codec=${finalConfig.codec}, hardwareAcceleration=${finalConfig.hardwareAcceleration}, bitrateMode=${finalConfig.bitrateMode}, bitrate=${bitrate}, width=${width}, height=${height}, framerate=${framerate}`);
+      return finalConfig;
     } else {
       log(`Config NOT supported: ${profile}+${hwMode}`);
     }
@@ -625,11 +629,13 @@ export async function findBestEncoderConfig(
   // Fallback to known working config (High + no-preference + constant)
   // This should always work on devices with WebCodecs support
   log('No optimized config found, using known working fallback: High+no-preference+constant');
-  return {
+  const fallbackConfig = {
     codec: 'avc1.64001f',
-    hardwareAcceleration: 'no-preference',
-    bitrateMode: 'constant',
+    hardwareAcceleration: 'no-preference' as const,
+    bitrateMode: 'constant' as const,
   };
+  log(`[ENCODER_CONFIG_STEP_1] findBestEncoderConfig() FALLBACK returning: codec=${fallbackConfig.codec}, hardwareAcceleration=${fallbackConfig.hardwareAcceleration}, bitrateMode=${fallbackConfig.bitrateMode}, bitrate=${bitrate}, width=${width}, height=${height}, framerate=${framerate}`);
+  return fallbackConfig;
 }
 
 // Test bitrate mode support
