@@ -62,6 +62,8 @@ export interface ConvertOptions {
   onProgress?: (progress: { percent: number; time: number; stage: string; hasProgress?: boolean; encodedTime?: number | null; encodingSpeed?: number | null; totalDuration?: number | null }) => void;
   onMetadata?: (metadata: VideoMetadata) => void;
   signal?: AbortSignal;
+  // Debug logger callback - called with (level, category, message) for debug panel
+  onLog?: (level: 'debug' | 'info' | 'warning' | 'error', category: string, message: string) => void;
 }
 
 export interface ConversionResult {

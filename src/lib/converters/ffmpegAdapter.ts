@@ -146,7 +146,6 @@ export class FFmpegConverter implements VideoConverter {
     ];
 
     // Set up progress tracking
-    let lastEncodedTime = 0;
     let totalDuration = 0;
     let lastProgressUpdate = Date.now();
 

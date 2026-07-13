@@ -28,7 +28,7 @@ import type {
 } from 'mediabunny';
 import type { VideoConverter, ConvertOptions, ConversionResult, ConverterSupport } from './types';
 import type { OutputAnalysis, ConversionErrorCode } from './types';
-import { checkWebCodecsSupport, findBestEncoderConfig } from './webCodecsSupport';
+import { checkWebCodecsSupport, findBestEncoderConfig, getProfileFromCodec, NoSupportedEncoderConfigError } from './webCodecsSupport';
 
 // Iterator result types for async generators
 type VideoIteratorResult = IteratorResult<VideoSample, void>;
@@ -550,7 +550,24 @@ export class LowLevelWebCodecsConverter implements VideoConverter {
       signal,
       hardwareMode = 'no-preference',
       targetBitrateBps, // Override bitrate for extreme testing
+      onLog,
     } = options;
+
+    // Helper to log both to console and debug panel
+    const debugLog = (level: 'debug' | 'info' | 'warning' | 'error', category: string, message: string) => {
+      const fullMessage = `[${category}] ${message}`;
+      switch (level) {
+        case 'error':
+          console.error(fullMessage);
+          break;
+        case 'warning':
+          console.warn(fullMessage);
+          break;
+        default:
+          console.log(fullMessage);
+      }
+      onLog?.(level, category, message);
+    };
 
     // Reset state for new conversion
     this.resetState();
@@ -561,21 +578,9 @@ export class LowLevelWebCodecsConverter implements VideoConverter {
     this.debugInfo.hardwareMode = hardwareMode;
     this.debugInfo.qualityPreset = quality;
 
-    console.log('╔══════════════════════════════════════════════════════════════╗');
-    console.log('║  LOW-LEVEL WEBCODECS CONVERTER - CONVERSION START         ║');
-    console.log('╚══════════════════════════════════════════════════════════════╝');
-    console.log(`[conversionId] ${conversionId}`);
-    console.log('[Input Parameters]');
-    console.log('  quality:', quality);
-    console.log('  hardwareMode:', hardwareMode);
-    console.log('  targetWidth:', targetWidth ?? 'auto');
-    console.log('  targetHeight:', targetHeight ?? 'auto');
-    console.log('  frameRate:', frameRate);
-    console.log('  file.name:', file.name);
-    console.log('  file.size:', (file.size / 1024 / 1024).toFixed(2), 'MB');
-    if (targetBitrateBps) {
-      console.log('  targetBitrateBps:', targetBitrateBps, '(EXTREME TEST OVERRIDE)');
-    }
+    debugLog('info', 'Convert', `Dönüştürme başladı (ID: ${conversionId})`);
+    debugLog('info', 'Convert', `Kalite: ${quality}, Hardware: ${hardwareMode}, Dosya: ${file.name}`);
+    debugLog('info', 'Convert', `Dosya boyutu: ${(file.size / 1024 / 1024).toFixed(2)} MB`);
 
     // Check abort signal
     if (signal?.aborted) {
@@ -588,6 +593,10 @@ export class LowLevelWebCodecsConverter implements VideoConverter {
     let trackDetectionStartMs: number | null = null;
     let decoderTestStartMs: number | null = null;
     let hasInputAudio = false;
+    // Track the last trace step for debugging
+    let lastTraceStep = 'none';
+    const lastCandidate: string | null = null;
+    let lastError: { name: string; message: string; stack: string | null | undefined; cause: unknown } | null = null;
     let processingStartTimeMs = 0;
     let videoFrameCount = 0;
     let audioSampleCount = 0;
@@ -758,13 +767,32 @@ export class LowLevelWebCodecsConverter implements VideoConverter {
       );
 
       // [ENCODER_CONFIG_STEP_1] Log the encoderConfig from getEncoderConfigWithHardwareMode()
-      console.log(`[ENCODER_CONFIG_STEP_1] getEncoderConfigWithHardwareMode() return: codec=${encoderConfig.encoder.codec}, profile=High, hardwareAcceleration=${encoderConfig.encoder.hardwareAcceleration}, bitrate=${encoderConfig.encoder.bitrate}, bitrateMode=constant, width=${outputWidth}, height=${outputHeight}, framerate=${encoderConfig.encoder.framerate}`);
+      lastTraceStep = 'STEP_1';
+      const step1Data = {
+        step: 'STEP_1',
+        codec: encoderConfig.encoder.codec,
+        profile: 'High',
+        hardwareAcceleration: encoderConfig.encoder.hardwareAcceleration,
+        bitrate: encoderConfig.encoder.bitrate,
+        bitrateMode: 'constant',
+        width: outputWidth,
+        height: outputHeight,
+        framerate: encoderConfig.encoder.framerate,
+      };
+      console.log(`[ENCODER_CONFIG_STEP_1] ${JSON.stringify(step1Data)}`);
+      debugLog('info', 'EncoderConfig', JSON.stringify(step1Data));
 
       // Use encoder config bitrate or override for extreme testing
       const targetVideoBitrateBps = targetBitrateBps ?? encoderConfig.encoder.bitrate;
 
       // Find the best encoder config for this resolution/bitrate
-      console.log('[Optimizer] Finding optimal encoder config...');
+      debugLog('info', 'EncoderConfig', 'findBestEncoderConfig() çağrılıyor...');
+      debugLog('info', 'EncoderConfig-Before', JSON.stringify({
+        width: outputWidth,
+        height: outputHeight,
+        framerate: detectedFrameRate,
+        bitrate: targetVideoBitrateBps,
+      }));
       
       // findBestEncoderConfig tests all profiles in priority order and returns the first working one
       const bestConfig = await findBestEncoderConfig(
@@ -772,16 +800,28 @@ export class LowLevelWebCodecsConverter implements VideoConverter {
         outputHeight,
         detectedFrameRate,
         targetVideoBitrateBps,
-        false // Don't prefer variable bitrate for now
+        false, // Don't prefer variable bitrate for now
+        debugLog
       );
 
       // [ENCODER_CONFIG_STEP_2] Log what findBestEncoderConfig returned
-      console.log(`[ENCODER_CONFIG_STEP_2] bestConfig received: codec=${bestConfig.codec}, hardwareAcceleration=${bestConfig.hardwareAcceleration}, bitrateMode=${bestConfig.bitrateMode}, bitrate=${targetVideoBitrateBps}, width=${outputWidth}, height=${outputHeight}, framerate=${detectedFrameRate}`);
+      lastTraceStep = 'STEP_2';
+      const step2Data = {
+        step: 'STEP_2',
+        codec: bestConfig.codec,
+        profile: getProfileFromCodec(bestConfig.codec),
+        hardwareAcceleration: bestConfig.hardwareAcceleration,
+        bitrate: targetVideoBitrateBps,
+        bitrateMode: bestConfig.bitrateMode,
+        width: outputWidth,
+        height: outputHeight,
+        framerate: detectedFrameRate,
+      };
+      console.log(`[ENCODER_CONFIG_STEP_2] ${JSON.stringify(step2Data)}`);
+      debugLog('info', 'EncoderConfig', JSON.stringify(step2Data));
 
       // Determine profile name from codec
-      const profileName = bestConfig.codec === 'avc1.42E01e' ? 'Baseline'
-        : bestConfig.codec === 'avc1.4D401f' ? 'Main'
-        : 'High';
+      const profileName = getProfileFromCodec(bestConfig.codec);
 
       const selectedConfig = {
         codec: bestConfig.codec,
@@ -790,7 +830,9 @@ export class LowLevelWebCodecsConverter implements VideoConverter {
       };
 
       // [ENCODER_CONFIG_STEP_2b] Log the selectedConfig after assignment
-      console.log(`[ENCODER_CONFIG_STEP_2b] selectedConfig assigned: codec=${selectedConfig.codec}, hardwareAcceleration=${selectedConfig.hardwareAcceleration}, bitrateMode=${selectedConfig.bitrateMode}`);
+      lastTraceStep = 'STEP_2b';
+      console.log(`[ENCODER_CONFIG_STEP_2b] selectedConfig: ${JSON.stringify(selectedConfig)}`);
+      debugLog('info', 'EncoderConfig', `[STEP_2b] selectedConfig: codec=${selectedConfig.codec}, hw=${selectedConfig.hardwareAcceleration}`);
 
       // Record tested configs (in order of priority)
       const testedConfigs = [
@@ -812,13 +854,27 @@ export class LowLevelWebCodecsConverter implements VideoConverter {
       };
 
       console.log('[Optimizer] Selected config:', this.debugInfo.optimizationResults);
+      debugLog('info', 'EncoderConfig', `Seçilen: ${profileName}+${selectedConfig.hardwareAcceleration}`);
 
       // Create VideoEncoderConfig with optimized settings
       const bitrateMode = selectedConfig.bitrateMode;
       const latencyMode: 'quality' | 'realtime' = 'quality';
 
       // [ENCODER_CONFIG_STEP_3] Log the values being used to create videoEncoderConfig
-      console.log(`[ENCODER_CONFIG_STEP_3] Creating videoEncoderConfig: codec='avc', hardwareAcceleration=${selectedConfig.hardwareAcceleration}, bitrateMode=${bitrateMode}, bitrate=${targetVideoBitrateBps}, width=${outputWidth}, height=${outputHeight}, framerate=${detectedFrameRate}`);
+      lastTraceStep = 'STEP_3';
+      const step3Data = {
+        step: 'STEP_3',
+        codec: 'avc',
+        profile: profileName,
+        hardwareAcceleration: selectedConfig.hardwareAcceleration,
+        bitrate: targetVideoBitrateBps,
+        bitrateMode,
+        width: outputWidth,
+        height: outputHeight,
+        framerate: detectedFrameRate,
+      };
+      console.log(`[ENCODER_CONFIG_STEP_3] ${JSON.stringify(step3Data)}`);
+      debugLog('info', 'EncoderConfig', JSON.stringify(step3Data));
 
       const videoEncoderConfig: VideoEncodingConfig = {
         codec: 'avc',
@@ -829,7 +885,20 @@ export class LowLevelWebCodecsConverter implements VideoConverter {
         keyFrameInterval: 2,
         onEncoderConfig: (config) => {
           // [ENCODER_CONFIG_STEP_5] Log the actual config from onEncoderConfig callback
-          console.log(`[ENCODER_CONFIG_STEP_5] onEncoderConfig callback: codec=${config.codec}, hardwareAcceleration=${(config as { hardwareAcceleration?: string }).hardwareAcceleration ?? 'N/A'}, bitrateMode=${hasBitrateMode(config) ? config.bitrateMode : 'N/A'}, bitrate=${config.bitrate}, width=${config.width}, height=${config.height}, framerate=${config.framerate}`);
+          lastTraceStep = 'STEP_5';
+          const step5Data = {
+            step: 'STEP_5',
+            codec: config.codec,
+            profile: getProfileFromCodec(config.codec),
+            hardwareAcceleration: (config as { hardwareAcceleration?: string }).hardwareAcceleration ?? 'unknown',
+            bitrate: config.bitrate,
+            bitrateMode: hasBitrateMode(config) ? config.bitrateMode : 'N/A',
+            width: config.width,
+            height: config.height,
+            framerate: config.framerate,
+          };
+          console.log(`[ENCODER_CONFIG_STEP_5] ${JSON.stringify(step5Data)}`);
+          debugLog('info', 'EncoderConfig', JSON.stringify(step5Data));
           
           // Log the actual encoder config that was created
           console.log('[Encoder] WebCodecs VideoEncoderConfig (actual):');
@@ -905,7 +974,20 @@ export class LowLevelWebCodecsConverter implements VideoConverter {
 
       // [ENCODER_CONFIG_STEP_6] Store encoder config for debug panel
       // Note: actual codec string will be updated in onEncoderConfig callback
-      console.log(`[ENCODER_CONFIG_STEP_6] Debug panel config: codec='avc', hardwareAcceleration=${selectedConfig.hardwareAcceleration}, bitrateMode=${bitrateMode}, bitrate=${targetVideoBitrateBps}, width=${outputWidth}, height=${outputHeight}, framerate=${detectedFrameRate}`);
+      lastTraceStep = 'STEP_6';
+      const step6Data = {
+        step: 'STEP_6',
+        codec: 'avc',
+        profile: profileName,
+        hardwareAcceleration: selectedConfig.hardwareAcceleration,
+        bitrate: targetVideoBitrateBps,
+        bitrateMode,
+        width: outputWidth,
+        height: outputHeight,
+        framerate: detectedFrameRate,
+      };
+      console.log(`[ENCODER_CONFIG_STEP_6] ${JSON.stringify(step6Data)}`);
+      debugLog('info', 'EncoderConfig', JSON.stringify(step6Data));
       
       this.debugInfo.encoderConfig = {
         codec: 'avc', // Will be updated with actual codec string from encoder
@@ -952,7 +1034,20 @@ export class LowLevelWebCodecsConverter implements VideoConverter {
       
       // [ENCODER_CONFIG_STEP_4] Log the config being passed to VideoSampleSource constructor
       const videoConfigTyped = videoEncoderConfig as VideoEncodingConfig & { width?: number; height?: number; framerate?: number };
-      console.log(`[ENCODER_CONFIG_STEP_4] VideoSampleSource constructor: codec='avc', hardwareAcceleration=${videoEncoderConfig.hardwareAcceleration}, bitrateMode=${videoEncoderConfig.bitrateMode}, bitrate=${videoEncoderConfig.bitrate}, width=${videoConfigTyped.width ?? outputWidth}, height=${videoConfigTyped.height ?? outputHeight}, framerate=${videoConfigTyped.framerate ?? detectedFrameRate}`);
+      lastTraceStep = 'STEP_4';
+      const step4Data = {
+        step: 'STEP_4',
+        codec: 'avc',
+        profile: profileName,
+        hardwareAcceleration: videoEncoderConfig.hardwareAcceleration,
+        bitrate: videoEncoderConfig.bitrate,
+        bitrateMode: videoEncoderConfig.bitrateMode,
+        width: videoConfigTyped.width ?? outputWidth,
+        height: videoConfigTyped.height ?? outputHeight,
+        framerate: videoConfigTyped.framerate ?? detectedFrameRate,
+      };
+      console.log(`[ENCODER_CONFIG_STEP_4] ${JSON.stringify(step4Data)}`);
+      debugLog('info', 'EncoderConfig', JSON.stringify(step4Data));
       
       this.videoEncoderSource = new Mediabunny.VideoSampleSource(videoEncoderConfig);
 
@@ -1553,7 +1648,29 @@ export class LowLevelWebCodecsConverter implements VideoConverter {
 
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorName = error instanceof Error ? error.name : typeof error;
+      const errorStack = error instanceof Error ? error.stack : null;
+      const errorCause = error instanceof Error ? error.cause : null;
+      
       console.error('[Error]', errorMessage);
+      
+      // Store raw error info for debugging (before any normalization)
+      lastError = {
+        name: errorName,
+        message: errorMessage,
+        stack: errorStack,
+        cause: errorCause ?? null,
+      };
+      
+      // Log raw error to debug panel
+      debugLog('error', 'WebCodecsRawError', JSON.stringify({
+        name: errorName,
+        message: errorMessage,
+        stack: errorStack?.substring(0, 500), // Truncate stack for log
+        cause: errorCause ? String(errorCause).substring(0, 200) : null,
+        stage: lastTraceStep,
+        lastCandidate,
+      }));
       
       // Check if this is an encoder configuration error
       const isEncoderConfigError = 
@@ -1622,7 +1739,21 @@ export class LowLevelWebCodecsConverter implements VideoConverter {
       // The specific error is logged for debugging but NOT shown to the user
       if (isEncoderConfigError) {
         console.error('[Encoder Config Error] Specific error (for debug only):', errorMessage);
-        throw new Error('Bu cihaz seçilen WebCodecs yapılandırmasını desteklemiyor. Uyumlu yapılandırma deneniyor...');
+        debugLog('error', 'EncoderConfig', 'WebCodecs encoder yapılandırma hatası - FFmpeg fallback açılıyor');
+        throw new Error('Bu cihazda çalışan bir WebCodecs H.264 yapılandırması bulunamadı.');
+      }
+
+      // Handle NoSupportedEncoderConfigError specifically
+      if (error instanceof NoSupportedEncoderConfigError) {
+        console.error('[Encoder Config Error] No supported config found:', error.testedCandidates);
+        debugLog('error', 'EncoderConfig', `Desteklenen config bulunamadı. Test edilen adaylar: ${error.testedCandidates.length}`);
+        
+        // Log each tested candidate
+        for (const tc of error.testedCandidates) {
+          debugLog('info', 'EncoderConfig', `  - ${tc.profile}+${tc.hwMode}: ${tc.result}${tc.error ? ` (${tc.error.substring(0, 100)})` : ''}`);
+        }
+        
+        throw new Error('Bu cihazda çalışan bir WebCodecs H.264 yapılandırması bulunamadı.');
       }
 
       // Re-throw with error code for better error classification

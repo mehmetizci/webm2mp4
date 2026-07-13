@@ -567,75 +567,142 @@ export async function testEncoderConfig(
   }
 }
 
+// Helper to get profile name from codec string
+export function getProfileFromCodec(codec: string): string {
+  if (codec === 'avc1.42E01e') return 'Baseline';
+  if (codec === 'avc1.4D401f') return 'Main';
+  if (codec === 'avc1.64001f') return 'High';
+  return 'Unknown';
+}
+
+// Custom error for no supported encoder config
+export class NoSupportedEncoderConfigError extends Error {
+  constructor(
+    public readonly testedCandidates: Array<{
+      codec: string;
+      profile: string;
+      hwMode: string;
+      result: 'supported' | 'not-supported' | 'error';
+      error?: string;
+    }>
+  ) {
+    super('No supported H.264 encoder configuration found');
+    this.name = 'NoSupportedEncoderConfigError';
+  }
+}
+
+// Debug logger type
+type DebugLogger = (level: 'debug' | 'info' | 'warning' | 'error', category: string, message: string) => void;
+
 // Find the best encoder config for a given resolution/bitrate
-// Priority order ensures High+no-preference (known working config) is always tried
-// Also tests prefer-hardware variants first, but falls back to no-preference
+// Priority order: STABILITY FIRST - try High+no-preference (most compatible) first
 export async function findBestEncoderConfig(
   width: number,
   height: number,
   framerate: number,
   bitrate: number,
-  preferVariableBitrate: boolean = false
+  preferVariableBitrate: boolean = false,
+  debugLog?: DebugLogger
 ): Promise<{
   codec: string;
   hardwareAcceleration: 'prefer-hardware' | 'no-preference';
   bitrateMode: 'constant' | 'variable';
 }> {
-  // Priority order: Try prefer-hardware first (faster if supported), then no-preference
-  // Within each HW mode, try profiles in order: High (most compatible), Main, Baseline
-  // This ensures High+no-preference (known working config) is always tested
+  // Priority order: STABILITY FIRST
+  // Try High+no-preference (most compatible) first, then other variants
   const priorityOrder: Array<{
     codec: string;
     profile: string;
     hwMode: 'prefer-hardware' | 'no-preference';
   }> = [
-    // First try prefer-hardware variants (faster if supported)
-    { codec: 'avc1.64001f', profile: 'High', hwMode: 'prefer-hardware' },
-    { codec: 'avc1.4D401f', profile: 'Main', hwMode: 'prefer-hardware' },
-    { codec: 'avc1.42E01e', profile: 'Baseline', hwMode: 'prefer-hardware' },
-    // Then try no-preference variants (more compatible)
+    // Stability first: High + no-preference (most compatible, reliable)
     { codec: 'avc1.64001f', profile: 'High', hwMode: 'no-preference' },
+    { codec: 'avc1.64001f', profile: 'High', hwMode: 'prefer-hardware' },
     { codec: 'avc1.4D401f', profile: 'Main', hwMode: 'no-preference' },
+    { codec: 'avc1.4D401f', profile: 'Main', hwMode: 'prefer-hardware' },
     { codec: 'avc1.42E01e', profile: 'Baseline', hwMode: 'no-preference' },
+    { codec: 'avc1.42E01e', profile: 'Baseline', hwMode: 'prefer-hardware' },
   ];
 
+  // Track tested candidates for debugging
+  const testedCandidates: Array<{
+    codec: string;
+    profile: string;
+    hwMode: string;
+    result: 'supported' | 'not-supported' | 'error';
+    error?: string;
+  }> = [];
+
+  const log = (level: 'debug' | 'info' | 'warning' | 'error', message: string) => {
+    console.log(`[findBestEncoderConfig] ${message}`);
+    debugLog?.(level, 'EncoderConfig', message);
+  };
+
+  log('info', `[ENCODER_CONFIG_FIND_STARTED] width=${width}, height=${height}, framerate=${framerate}, bitrate=${bitrate}`);
+
   // Test configs in priority order
-  for (const { codec, profile, hwMode } of priorityOrder) {
-    log(`Testing config: ${profile}+${hwMode} (${codec})`);
+  for (const candidate of priorityOrder) {
+    const candidateKey = `${candidate.profile}+${candidate.hwMode}`;
     
-    const result = await testEncoderConfig(codec, width, height, framerate, bitrate, hwMode);
+    log('info', `[ENCODER_CONFIG_CANDIDATE_START] Testing ${candidateKey} (${candidate.codec})`);
     
-    if (result.supported) {
-      log(`Config supported: ${profile}+${hwMode}`);
+    try {
+      const result = await testEncoderConfig(candidate.codec, width, height, framerate, bitrate, candidate.hwMode);
       
-      // Test bitrate mode if requested
-      if (preferVariableBitrate) {
-        const varResult = await testBitrateMode(codec, width, height, framerate, bitrate, hwMode, 'variable');
-        if (varResult.supported) {
-          const finalConfig = { codec, hardwareAcceleration: hwMode, bitrateMode: 'variable' as const };
-          log(`[ENCODER_CONFIG_STEP_1] findBestEncoderConfig() returning: codec=${finalConfig.codec}, hardwareAcceleration=${finalConfig.hardwareAcceleration}, bitrateMode=${finalConfig.bitrateMode}, bitrate=${bitrate}, width=${width}, height=${height}, framerate=${framerate}`);
-          return finalConfig;
+      testedCandidates.push({
+        codec: candidate.codec,
+        profile: candidate.profile,
+        hwMode: candidate.hwMode,
+        result: result.supported ? 'supported' : 'not-supported',
+      });
+      
+      log('info', `[ENCODER_CONFIG_CANDIDATE_RESULT] ${candidateKey}: ${result.supported ? 'SUPPORTED' : 'NOT SUPPORTED'}, actualHw=${result.actualHardwareAcceleration ?? 'unknown'}`);
+      
+      if (result.supported) {
+        log('info', `[ENCODER_CONFIG_SELECTED] Selecting: ${candidateKey} (${candidate.codec})`);
+        
+        // Test bitrate mode if requested
+        if (preferVariableBitrate) {
+          const varResult = await testBitrateMode(candidate.codec, width, height, framerate, bitrate, candidate.hwMode, 'variable');
+          if (varResult.supported) {
+            const finalConfig = { codec: candidate.codec, hardwareAcceleration: candidate.hwMode, bitrateMode: 'variable' as const };
+            log('info', `[ENCODER_CONFIG_STEP_1] Returning: ${JSON.stringify(finalConfig)}`);
+            return finalConfig;
+          }
+          log('info', `[ENCODER_CONFIG] Variable bitrate not supported for ${candidateKey}, using constant`);
         }
+        
+        const finalConfig = { codec: candidate.codec, hardwareAcceleration: candidate.hwMode, bitrateMode: 'constant' as const };
+        log('info', `[ENCODER_CONFIG_STEP_1] Returning: ${JSON.stringify(finalConfig)}`);
+        return finalConfig;
       }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      testedCandidates.push({
+        codec: candidate.codec,
+        profile: candidate.profile,
+        hwMode: candidate.hwMode,
+        result: 'error',
+        error: errorMessage,
+      });
       
-      const finalConfig = { codec, hardwareAcceleration: hwMode, bitrateMode: 'constant' as const };
-      log(`[ENCODER_CONFIG_STEP_1] findBestEncoderConfig() returning: codec=${finalConfig.codec}, hardwareAcceleration=${finalConfig.hardwareAcceleration}, bitrateMode=${finalConfig.bitrateMode}, bitrate=${bitrate}, width=${width}, height=${height}, framerate=${framerate}`);
-      return finalConfig;
-    } else {
-      log(`Config NOT supported: ${profile}+${hwMode}`);
+      log('error', `[ENCODER_CONFIG_CANDIDATE_ERROR] ${candidateKey}: ${errorMessage}`);
+      
+      // Continue to next candidate on error (don't fail the whole function)
+      continue;
     }
   }
 
-  // Fallback to known working config (High + no-preference + constant)
-  // This should always work on devices with WebCodecs support
-  log('No optimized config found, using known working fallback: High+no-preference+constant');
-  const fallbackConfig = {
-    codec: 'avc1.64001f',
-    hardwareAcceleration: 'no-preference' as const,
-    bitrateMode: 'constant' as const,
-  };
-  log(`[ENCODER_CONFIG_STEP_1] findBestEncoderConfig() FALLBACK returning: codec=${fallbackConfig.codec}, hardwareAcceleration=${fallbackConfig.hardwareAcceleration}, bitrateMode=${fallbackConfig.bitrateMode}, bitrate=${bitrate}, width=${width}, height=${height}, framerate=${framerate}`);
-  return fallbackConfig;
+  // All candidates tested, none supported
+  log('error', `[ENCODER_CONFIG_NONE_SUPPORTED] All ${testedCandidates.length} candidates failed`);
+  
+  // Log summary of tested candidates
+  for (const tc of testedCandidates) {
+    log('info', `  - ${tc.profile}+${tc.hwMode}: ${tc.result}${tc.error ? ` (${tc.error})` : ''}`);
+  }
+  
+  // Throw error instead of fallback - let the caller decide what to do
+  throw new NoSupportedEncoderConfigError(testedCandidates);
 }
 
 // Test bitrate mode support

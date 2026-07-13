@@ -650,6 +650,12 @@ export function WebmConverter() {
                 metadataSource: 'mediabunny',
               });
             },
+            // Pass debug logger to converter for debug panel output
+            onLog: (level, category, message) => {
+              // Map 'debug' to 'info' since LogLevel doesn't include 'debug'
+              const mappedLevel = level === 'debug' ? 'info' : level;
+              addLog(mappedLevel, category, message);
+            },
           });
           
           console.log('[WebCodecs] Conversion result:', result);
