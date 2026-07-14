@@ -706,22 +706,38 @@ export function DebugPanel({ debugInfo, isVisible, webCodecsDetection, selectedE
           </DebugSection>
 
           {/* Encoding Stats */}
-          {(debugInfo.encodedTime !== null || debugInfo.encodingSpeed !== null) && (
+          {(debugInfo.encodedTime !== null || debugInfo.encodingSpeed !== null || debugInfo.ffmpegCommand) && (
             <DebugSection title="Encoding İstatistikleri">
+              {debugInfo.ffmpegCommand && (
+                <div className="mb-2">
+                  <span className="text-slate-500 text-xs block mb-1">FFmpeg Komutu:</span>
+                  <div className="bg-slate-900 text-emerald-400 p-2 rounded-lg font-mono text-xs break-all whitespace-pre-wrap">
+                    {debugInfo.ffmpegCommand}
+                  </div>
+                </div>
+              )}
               <DebugRow 
-                label="Toplam Video Süresi" 
+                label="Gerçek Video Süresi" 
                 value={formatEncodedTime(debugInfo.totalDuration ?? null)} 
               />
               <DebugRow 
-                label="İşlenen Video Süresi" 
+                label="İşlenen Süre" 
                 value={formatEncodedTime(debugInfo.encodedTime ?? null)} 
               />
               <DebugRow 
-                label="Gerçek Progress (%)" 
-                value={debugInfo.encodedTime !== null && debugInfo.totalDuration !== null && debugInfo.totalDuration > 0 
-                  ? `${Math.min(99, Math.floor((debugInfo.encodedTime / debugInfo.totalDuration) * 100))}%` 
-                  : null} 
+                label="Ortalama Encode Hızı" 
+                value={debugInfo.averageSpeed !== null ? `${debugInfo.averageSpeed.toFixed(2)}x` : null} 
               />
+              <DebugRow 
+                label="Anlık Encoding Hızı" 
+                value={debugInfo.encodingSpeed !== null ? `${debugInfo.encodingSpeed.toFixed(3)}x` : null} 
+              />
+              {debugInfo.encodeTime !== null && (
+                <DebugRow 
+                  label="Encode Süresi" 
+                  value={`${debugInfo.encodeTime.toFixed(1)} saniye`} 
+                />
+              )}
               <DebugRow 
                 label="Metadata Kaynağı" 
                 value={
@@ -729,10 +745,6 @@ export function DebugPanel({ debugInfo, isVisible, webCodecsDetection, selectedE
                   debugInfo.metadataSource === 'ffmpeg_fallback' ? 'FFmpeg Fallback' : 
                   debugInfo.metadataSource === 'mediabunny' ? 'Mediabunny' : null
                 } 
-              />
-              <DebugRow 
-                label="Encoding Hızı" 
-                value={debugInfo.encodingSpeed !== null ? `${debugInfo.encodingSpeed.toFixed(3)}x` : null} 
               />
               <DebugRow 
                 label="FPS" 

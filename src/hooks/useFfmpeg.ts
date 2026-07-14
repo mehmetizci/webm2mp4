@@ -11,6 +11,21 @@ import type {
 } from '@/types/converter';
 import { getOutputFileName } from '@/lib/file-utils';
 
+// Generate unique file names for each conversion job
+function generateInputFileName(jobId: string): string {
+  return `input-${jobId}.webm`;
+}
+
+function generateOutputFileName(jobId: string): string {
+  return `output-${jobId}.mp4`;
+}
+
+// Generate unique job ID
+function generateJobId(): string {
+  return `job-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+}
+
+// Fallback constants for cleanup when job ID is not available
 const INPUT_FILE = 'input.webm';
 const OUTPUT_FILE = 'output.mp4';
 
@@ -122,6 +137,10 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
   const videoDurationRef = useRef<number | null>(null);
   const maxEncodedTimeRef = useRef<number>(0); // Track max encoded time for FFmpeg fallback
   const hasHtml5MetadataRef = useRef(false); // Track if HTML5 metadata was successful
+  const jobIdRef = useRef<string>(''); // Current job ID for unique file names
+  const currentInputFileRef = useRef<string>(''); // Current input file name
+  const currentOutputFileRef = useRef<string>(''); // Current output file name
+  const ffmpegCommandRef = useRef<string[]>([]); // Store the FFmpeg command for debug
   
   const [isLoaded, setIsLoaded] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -228,23 +247,25 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
     
     try {
       const ffmpeg = ffmpegRef.current;
+      const inputFileToDelete = currentInputFileRef.current || INPUT_FILE;
+      const outputFileToDelete = currentOutputFileRef.current || OUTPUT_FILE;
       
       // Step 1: Clean VFS files FIRST (before terminate)
       // Files must be deleted before worker is terminated
       if (ffmpeg) {
         try {
-          await ffmpeg.deleteFile(INPUT_FILE);
+          await ffmpeg.deleteFile(inputFileToDelete);
           validation.inputDeleted = true;
-          addLog?.('info', 'Cleanup', 'Input file deleted');
+          addLog?.('info', 'Cleanup', `Input file deleted: ${inputFileToDelete}`);
         } catch {
           // File might not exist - this is OK
           validation.inputDeleted = true; // Consider it cleaned
         }
         
         try {
-          await ffmpeg.deleteFile(OUTPUT_FILE);
+          await ffmpeg.deleteFile(outputFileToDelete);
           validation.outputDeleted = true;
-          addLog?.('info', 'Cleanup', 'Output file deleted');
+          addLog?.('info', 'Cleanup', `Output file deleted: ${outputFileToDelete}`);
         } catch {
           // File might not exist - this is OK
           validation.outputDeleted = true; // Consider it cleaned
@@ -339,16 +360,20 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
     const ffmpeg = ffmpegRef.current;
     if (!ffmpeg) return;
     
-    addLog?.('info', 'Cleanup', 'Pre-cleanup: checking for leftover files');
+    // Clean up the previous conversion's files (if any)
+    const prevInputFile = currentInputFileRef.current || INPUT_FILE;
+    const prevOutputFile = currentOutputFileRef.current || OUTPUT_FILE;
+    
+    addLog?.('info', 'Cleanup', `Pre-cleanup: checking for leftover files (${prevInputFile}, ${prevOutputFile})`);
     try {
-      await ffmpeg.deleteFile(INPUT_FILE);
-      addLog?.('info', 'Cleanup', 'Leftover input file removed');
+      await ffmpeg.deleteFile(prevInputFile);
+      addLog?.('info', 'Cleanup', `Leftover input file removed: ${prevInputFile}`);
     } catch {
       // File might not exist
     }
     try {
-      await ffmpeg.deleteFile(OUTPUT_FILE);
-      addLog?.('info', 'Cleanup', 'Leftover output file removed');
+      await ffmpeg.deleteFile(prevOutputFile);
+      addLog?.('info', 'Cleanup', `Leftover output file removed: ${prevOutputFile}`);
     } catch {
       // File might not exist
     }
@@ -461,7 +486,9 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
     maxRate: number,
     useFallback: boolean, 
     sourceWidth: number | null,
-    sourceHeight: number | null
+    sourceHeight: number | null,
+    inputFile: string,
+    outputFile: string
   ): string[] => {
     const mobile = isMobileDevice();
     const effectiveMaxRate = getMaxRateForResolution(sourceWidth, maxRate);
@@ -470,7 +497,7 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
 
     const args: string[] = [
       '-fflags', '+genpts',
-      '-i', INPUT_FILE,
+      '-i', inputFile,
       '-map', '0:v:0',
       '-map', '0:a?',
     ];
@@ -513,7 +540,7 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
       '-ar', '48000',
       '-ac', '1', // Mono
       '-movflags', '+faststart',
-      OUTPUT_FILE,
+      outputFile,
     );
 
     addLog?.('info', 'Convert', `FFmpeg: CRF=${crf}, maxrate=${effectiveMaxRate}k, bufsize=${bufSize}k, scale=${scaleFilter || 'none'}`);
@@ -542,6 +569,15 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
       onStageChange?.('error');
       throw err;
     }
+
+    // Generate unique job ID and file names for this conversion
+    const jobId = generateJobId();
+    const inputFile = generateInputFileName(jobId);
+    const outputFile = generateOutputFileName(jobId);
+    jobIdRef.current = jobId;
+    currentInputFileRef.current = inputFile;
+    currentOutputFileRef.current = outputFile;
+    addLog?.('info', 'Convert', `Job ID: ${jobId}, Input: ${inputFile}, Output: ${outputFile}`);
 
     // Pre-cleanup: Remove any leftover files from previous conversion
     addLog?.('info', 'Cleanup', 'Temizlik: önceki dosyalar kontrol ediliyor...');
@@ -628,7 +664,7 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
     
     try {
       fileDataRef.current = fileData;
-      await ffmpeg.writeFile(INPUT_FILE, fileData);
+      await ffmpeg.writeFile(inputFile, fileData);
       updateDebugInfo?.({ fileWriteStatus: 'written' });
       addLog?.('success', 'Convert', `WRITE_FILE_SUCCESS`);
     } catch (err) {
@@ -647,7 +683,7 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
   
     // Step 3: Execute FFmpeg
     onStageChange?.('converting');
-    updateProgress(0, 'converting', false, null, null, videoDurationRef.current);
+    updateProgress(8, 'converting', false, null, null, videoDurationRef.current);
     const execStartTime = Date.now();
     addLog?.('info', 'Convert', 'EXEC_STARTED');
     updateDebugInfo?.({ ffmpegExecStatus: 'running', ffmpegExecStartTime: execStartTime });
@@ -657,18 +693,24 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
       maxrate,
       false, 
       sourceWidth ?? null, 
-      sourceHeight ?? null
+      sourceHeight ?? null,
+      inputFile,
+      outputFile
     );
+    // Store the command for debug panel
+    ffmpegCommandRef.current = ffmpegArgs;
     addLog?.('info', 'FFmpeg', `Komut: ${ffmpegArgs.join(' ')}`);
+    updateDebugInfo?.({ ffmpegCommand: ffmpegArgs.join(' ') });
 
     let maxDuplicatedFrames = 0;
     let hasWarnedAboutDuplicates = false;
     let hasRetriedWithFallback = false;
-    let lastProgressPercent = 0;
+    let lastProgressPercent = 8;
 
     // Calculate progress percentage based on encoded time and video duration
     // Formula: (encodedTime / totalDuration) * 100
-    // Caps at 99% until completion, never goes backwards
+    // Progress range: 8-98%, never goes backwards
+    // FFmpeg progress.time is in microseconds, so divide by 1_000_000
     const calculateProgressPercent = (encodedTime: number | null): number => {
       const duration = videoDurationRef.current;
       
@@ -697,13 +739,24 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
     };
 
     // Progress handler
+    // FFmpeg progress.time is in microseconds, convert to seconds: time / 1_000_000
     progressHandlerRef.current = (data: { progress: number; time?: number }) => {
       lastActivityRef.current = Date.now();
-      const normalizedProgress = data.progress;
-      if (normalizedProgress > 0 && normalizedProgress <= 1) {
-        lastProgressPercent = calculateProgressPercent(null);
-        updateProgress(lastProgressPercent, 'converting', true, null, null, videoDurationRef.current);
-        updateDebugInfo?.({ lastProgressValue: lastProgressPercent });
+      
+      // Use progress.time if available (microseconds -> seconds)
+      if (data.time !== undefined && data.time > 0) {
+        const encodedSeconds = data.time / 1_000_000;
+        lastProgressPercent = calculateProgressPercent(encodedSeconds);
+        updateProgress(lastProgressPercent, 'converting', true, encodedSeconds, null, videoDurationRef.current);
+        updateDebugInfo?.({ lastProgressValue: lastProgressPercent, encodedTime: encodedSeconds });
+      } else {
+        // Fallback to normalized progress if time not available
+        const normalizedProgress = data.progress;
+        if (normalizedProgress > 0 && normalizedProgress <= 1) {
+          lastProgressPercent = calculateProgressPercent(null);
+          updateProgress(lastProgressPercent, 'converting', true, null, null, videoDurationRef.current);
+          updateDebugInfo?.({ lastProgressValue: lastProgressPercent });
+        }
       }
     };
     ffmpeg.on('progress', progressHandlerRef.current);
@@ -904,17 +957,28 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
           maxrate,
           true, 
           sourceWidth ?? null, 
-          sourceHeight ?? null
+          sourceHeight ?? null,
+          inputFile,
+          outputFile
         );
         addLog?.('info', 'FFmpeg', `Fallback Komut: ${fallbackArgs.join(' ')}`);
         
-        progressHandlerRef.current = (data: { progress: number }) => {
+        // Update progress handler for fallback
+        progressHandlerRef.current = (data: { progress: number; time?: number }) => {
           lastActivityRef.current = Date.now();
-          const normalizedProgress = data.progress;
-          if (normalizedProgress > 0 && normalizedProgress <= 1) {
-            lastProgressPercent = calculateProgressPercent(null);
-            updateProgress(lastProgressPercent, 'converting', true, null, null, videoDurationRef.current);
-            updateDebugInfo?.({ lastProgressValue: lastProgressPercent });
+          // Use progress.time if available (microseconds -> seconds)
+          if (data.time !== undefined && data.time > 0) {
+            const encodedSeconds = data.time / 1_000_000;
+            lastProgressPercent = calculateProgressPercent(encodedSeconds);
+            updateProgress(lastProgressPercent, 'converting', true, encodedSeconds, null, videoDurationRef.current);
+            updateDebugInfo?.({ lastProgressValue: lastProgressPercent, encodedTime: encodedSeconds });
+          } else {
+            const normalizedProgress = data.progress;
+            if (normalizedProgress > 0 && normalizedProgress <= 1) {
+              lastProgressPercent = calculateProgressPercent(null);
+              updateProgress(lastProgressPercent, 'converting', true, null, null, videoDurationRef.current);
+              updateDebugInfo?.({ lastProgressValue: lastProgressPercent });
+            }
           }
         };
         ffmpeg.on('progress', progressHandlerRef.current);
@@ -993,6 +1057,7 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
       progressHandlerRef.current = null;
     }
     ffmpeg.off('log', ffmpegLogHandler);
+    // Note: retryLogHandler is already cleaned up in the catch block above if retry was attempted
 
     if (!execSuccess && execError) {
       // Only set ffmpegExecStatus to error, NOT ffmpegLoadStatus
@@ -1018,7 +1083,7 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
     
     let outputData: Uint8Array | string;
     try {
-      const rawOutput = await ffmpeg.readFile(OUTPUT_FILE);
+      const rawOutput = await ffmpeg.readFile(outputFile);
       if (rawOutput instanceof Uint8Array) {
         outputData = rawOutput;
       } else if (typeof rawOutput === 'string') {
@@ -1076,35 +1141,45 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
       ? videoDurationSeconds 
       : maxEncodedTimeRef.current;
     
-    // Calculate bitrates based on video duration (FFmpeg gives kbps directly, no need to multiply)
-    const videoBitrateKbps = finalVideoDuration > 0 ? (outputSize * 8 / 1000 / finalVideoDuration) : null;
-    // Use actual audio bitrate if audio was present, otherwise 0
-    const audioBitrateKbps = hasAudioDetected ? 96 : 0;
-    const totalBitrateKbps = videoBitrateKbps !== null ? videoBitrateKbps + audioBitrateKbps : null;
+    // Calculate bitrates based on video duration
+    // Formula: actualTotalBitrate = (outputSizeBytes * 8) / videoDurationSeconds (result in bps)
+    // Then convert to kbps: / 1000
+    const outputSizeBytes = outputSize;
+    const videoDurationSec = finalVideoDuration;
+    
+    const actualTotalBitrateBps = videoDurationSec > 0 ? (outputSizeBytes * 8) / videoDurationSec : null;
+    const actualTotalBitrateKbps = actualTotalBitrateBps !== null ? actualTotalBitrateBps / 1000 : null;
+    
+    // If audio present: actualVideoBitrate = actualTotalBitrate - 128000 (128 kbps audio)
+    const AUDIO_BITRATE_BPS = 128000; // 128 kbps for AAC
+    const audioBitrateBps = hasAudioDetected ? AUDIO_BITRATE_BPS : 0;
+    const actualVideoBitrateBps = actualTotalBitrateBps !== null ? actualTotalBitrateBps - audioBitrateBps : null;
+    const actualVideoBitrateKbps = actualVideoBitrateBps !== null ? actualVideoBitrateBps / 1000 : null;
     
     // Calculate average encoding speed (video seconds per wall clock second)
     const averageSpeed = encodeTime > 0 ? (finalVideoDuration / encodeTime) : null;
     
     addLog?.('success', 'Convert', `CONVERSION_COMPLETE: ${conversionTime.toFixed(1)} sn`);
     addLog?.('info', 'Convert', `Input: ${(inputSize / (1024 * 1024)).toFixed(2)}MB`);
-    addLog?.('info', 'Convert', `Output: ${(outputSize / (1024 * 1024)).toFixed(2)}MB`);
+    addLog?.('info', 'Convert', `Output: ${(outputSizeBytes / (1024 * 1024)).toFixed(2)}MB`);
     addLog?.('info', 'Convert', `Compression: ${compressionRatio}%`);
     addLog?.('info', 'Convert', `Video süresi: ${finalVideoDuration.toFixed(2)}sn, Encode süresi: ${encodeTime.toFixed(1)}s, Hız: ${averageSpeed?.toFixed(2) ?? '-'}x`);
-    if (totalBitrateKbps !== null) {
-      addLog?.('info', 'Convert', `Total bitrate: ${totalBitrateKbps.toFixed(0)}kbps`);
+    if (actualTotalBitrateKbps !== null) {
+      addLog?.('info', 'Convert', `Çıktı video bitrate: ${actualVideoBitrateKbps?.toFixed(0) ?? '-'}kbps, Toplam bitrate: ${actualTotalBitrateKbps.toFixed(0)}kbps`);
     }
     if (!hasAudioDetected) {
       addLog?.('info', 'Convert', 'Ses: Çıktıda ses bulunamadı');
     }
 
     // Update debug info with compression and encoding stats
+    // Pass bitrates in bps for proper formatting by formatBitrate()
     updateDebugInfo?.({
       inputSize,
-      outputSize,
+      outputSize: outputSizeBytes,
       compressionRatio,
-      videoBitrate: videoBitrateKbps,
-      audioBitrate: audioBitrateKbps,
-      totalBitrate: totalBitrateKbps,
+      videoBitrate: actualVideoBitrateBps,
+      audioBitrate: audioBitrateBps,
+      totalBitrate: actualTotalBitrateBps,
       encodeTime,
       averageSpeed,
       totalDuration: finalVideoDuration,
@@ -1124,11 +1199,11 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
       videoDuration: finalVideoDuration,
       conversionTime,
       inputSize,
-      outputSize,
+      outputSize: outputSizeBytes,
       compressionRatio,
-      videoBitrate: videoBitrateKbps ?? undefined,
-      audioBitrate: audioBitrateKbps,
-      totalBitrate: totalBitrateKbps ?? undefined,
+      videoBitrate: actualVideoBitrateKbps ?? undefined,
+      audioBitrate: audioBitrateBps / 1000,
+      totalBitrate: actualTotalBitrateKbps ?? undefined,
       encodeTime,
       averageSpeed: averageSpeed ?? undefined,
       hasAudio: hasAudioDetected,

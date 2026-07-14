@@ -79,6 +79,8 @@ export interface ConversionDebugInfo {
   // Encoding stats
   encodeTime: number | null;
   averageSpeed: number | null;
+  // FFmpeg command used
+  ffmpegCommand: string | null;
   // WebCodecs encoder config (from actual encoder settings)
   webCodecsEncoderConfig: {
     codec: string;           // Actual codec string from encoder (e.g., avc1.64001f)
@@ -395,6 +397,7 @@ const initialDebugInfo: ConversionDebugInfo = {
   // Encoding stats
   encodeTime: null,
   averageSpeed: null,
+  ffmpegCommand: null,
   // WebCodecs encoder config
   webCodecsEncoderConfig: null,
   webCodecsActualBitrate: null,
