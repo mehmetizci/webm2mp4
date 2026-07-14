@@ -73,6 +73,7 @@ export interface ConversionDebugInfo {
   inputSize: number | null;
   outputSize: number | null;
   compressionRatio: number | null;
+  // Bitrates in bps (bits per second) - use formatBitrate() for display
   videoBitrate: number | null;
   audioBitrate: number | null;
   totalBitrate: number | null;
@@ -391,6 +392,7 @@ const initialDebugInfo: ConversionDebugInfo = {
   inputSize: null,
   outputSize: null,
   compressionRatio: null,
+  // Bitrates in bps (bits per second) - use formatBitrate() for display
   videoBitrate: null,
   audioBitrate: null,
   totalBitrate: null,

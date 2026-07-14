@@ -62,9 +62,9 @@ export interface ConversionResult {
   inputSize: number;
   outputSize: number;
   compressionRatio: number; // percentage (e.g., 55 means 55% reduction)
-  videoBitrate?: number; // kbps
-  audioBitrate?: number; // kbps
-  totalBitrate?: number; // kbps
+  videoBitrate?: number; // bps (bits per second) - use formatBitrate() for display
+  audioBitrate?: number; // bps (bits per second)
+  totalBitrate?: number; // bps (bits per second)
   // Encoding stats
   encodeTime?: number; // seconds (FFmpeg execution time)
   averageSpeed?: number; // e.g., 0.44x

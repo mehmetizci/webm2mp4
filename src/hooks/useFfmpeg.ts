@@ -1201,9 +1201,10 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
       inputSize,
       outputSize: outputSizeBytes,
       compressionRatio,
-      videoBitrate: actualVideoBitrateKbps ?? undefined,
-      audioBitrate: audioBitrateBps / 1000,
-      totalBitrate: actualTotalBitrateKbps ?? undefined,
+      // Bitrates in bps for formatBitrate() function
+      videoBitrate: actualVideoBitrateBps ?? undefined,
+      audioBitrate: audioBitrateBps,
+      totalBitrate: actualTotalBitrateBps ?? undefined,
       encodeTime,
       averageSpeed: averageSpeed ?? undefined,
       hasAudio: hasAudioDetected,
