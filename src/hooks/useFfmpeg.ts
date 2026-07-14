@@ -187,13 +187,21 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
   ) => {
     const elapsed = (Date.now() - startTimeRef.current) / 1000;
     setProgress(prev => ({
-      percent: Math.min(Math.max(percent, 0), 100),
+      percent: percent >= 0 ? Math.min(percent, 100) : prev.percent,
       time: elapsed,
       stage,
       hasProgress,
-      encodedTime: encodedTime !== undefined ? encodedTime : prev.encodedTime,
-      encodingSpeed: encodingSpeed !== undefined ? encodingSpeed : prev.encodingSpeed,
-      totalDuration: totalDuration !== undefined ? totalDuration : prev.totalDuration,
+      // Safe merge: only update if value is valid, preserve existing
+      encodedTime: encodedTime !== undefined && encodedTime !== null && encodedTime >= 0 
+        ? encodedTime 
+        : prev.encodedTime,
+      encodingSpeed: encodingSpeed !== undefined && encodingSpeed !== null 
+        ? encodingSpeed 
+        : prev.encodingSpeed,
+      // Safe merge: totalDuration should never be overwritten with null/0
+      totalDuration: totalDuration !== undefined && totalDuration !== null && totalDuration > 0
+        ? totalDuration
+        : prev.totalDuration,
     }));
   }, []);
 
@@ -707,56 +715,39 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
     let hasRetriedWithFallback = false;
     let lastProgressPercent = 8;
 
-    // Calculate progress percentage based on encoded time and video duration
-    // Formula: (encodedTime / totalDuration) * 100
-    // Progress range: 8-98%, never goes backwards
-    // FFmpeg progress.time is in microseconds, so divide by 1_000_000
-    const calculateProgressPercent = (encodedTime: number | null): number => {
-      const duration = videoDurationRef.current;
-      
-      // Validate duration - must be a reasonable positive value
-      if (duration === null || duration <= 0.1) {
-        // Duration too small or invalid - don't update progress
-        return lastProgressPercent;
-      }
-      
-      if (encodedTime === null) {
-        // No encoded time - return current progress
-        return lastProgressPercent;
-      }
-      
-      // Sanity check: if encoded time is unreasonably large compared to duration, something is wrong
-      if (encodedTime > duration * 1.05) {
-        // Encoded time exceeds duration - likely duration was wrong
-        // Don't update progress to avoid jumping to 99%
-        return lastProgressPercent;
-      }
-      
-      const rawPercent = (encodedTime / duration) * 100;
-      const newPercent = Math.floor(Math.min(99, rawPercent));
-      // Progress never goes backwards
-      return Math.max(lastProgressPercent, newPercent);
-    };
-
     // Progress handler
     // FFmpeg progress.time is in microseconds, convert to seconds: time / 1_000_000
+    // IMPORTANT: Only use time for progress calculation, NOT data.progress
     progressHandlerRef.current = (data: { progress: number; time?: number }) => {
       lastActivityRef.current = Date.now();
       
-      // Use progress.time if available (microseconds -> seconds)
+      // Only use progress.time (microseconds -> seconds), never data.progress
       if (data.time !== undefined && data.time > 0) {
         const encodedSeconds = data.time / 1_000_000;
-        lastProgressPercent = calculateProgressPercent(encodedSeconds);
-        updateProgress(lastProgressPercent, 'converting', true, encodedSeconds, null, videoDurationRef.current);
-        updateDebugInfo?.({ lastProgressValue: lastProgressPercent, encodedTime: encodedSeconds });
-      } else {
-        // Fallback to normalized progress if time not available
-        const normalizedProgress = data.progress;
-        if (normalizedProgress > 0 && normalizedProgress <= 1) {
-          lastProgressPercent = calculateProgressPercent(null);
-          updateProgress(lastProgressPercent, 'converting', true, null, null, videoDurationRef.current);
-          updateDebugInfo?.({ lastProgressValue: lastProgressPercent });
+        const realDuration = videoDurationRef.current;
+        
+        // Calculate percentage based on encodedSeconds / realDurationSeconds
+        // Progress range: 8-98%, never goes backwards
+        let newPercent = 8;
+        if (realDuration !== null && realDuration > 0.1) {
+          const ratio = Math.min(1, encodedSeconds / realDuration);
+          newPercent = Math.floor(8 + ratio * 90); // 8% to 98%
+          newPercent = Math.min(98, Math.max(8, newPercent));
         }
+        lastProgressPercent = Math.max(lastProgressPercent, newPercent);
+        
+        // Calculate average encoding speed
+        const elapsedEncodeSeconds = (Date.now() - execStartTime) / 1000;
+        const avgSpeed = elapsedEncodeSeconds > 0 
+          ? encodedSeconds / elapsedEncodeSeconds 
+          : null;
+        
+        updateProgress(lastProgressPercent, 'converting', true, encodedSeconds, avgSpeed, realDuration);
+        updateDebugInfo?.({ 
+          lastProgressValue: lastProgressPercent, 
+          encodedTime: encodedSeconds,
+          averageSpeed: avgSpeed,
+        });
       }
     };
     ffmpeg.on('progress', progressHandlerRef.current);
@@ -842,11 +833,32 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
           }
         }
 
-        // Update progress based on encoded time if we have video duration
+        // Update progress based on encoded time from log stats
+        // Use same calculation logic as progress handler
         if (stats.encodedTime !== null) {
-          lastProgressPercent = calculateProgressPercent(stats.encodedTime);
-          updateProgress(lastProgressPercent, 'converting', true, stats.encodedTime, stats.encodingSpeed, videoDurationRef.current);
-          updateDebugInfo?.({ lastProgressValue: lastProgressPercent });
+          const encodedSeconds = stats.encodedTime;
+          const realDuration = videoDurationRef.current;
+          
+          let newPercent = lastProgressPercent;
+          if (realDuration !== null && realDuration > 0.1) {
+            const ratio = Math.min(1, encodedSeconds / realDuration);
+            newPercent = Math.floor(8 + ratio * 90);
+            newPercent = Math.min(98, Math.max(8, newPercent));
+          }
+          lastProgressPercent = Math.max(lastProgressPercent, newPercent);
+          
+          // Calculate average encoding speed
+          const elapsedEncodeSeconds = (Date.now() - execStartTime) / 1000;
+          const avgSpeed = elapsedEncodeSeconds > 0 
+            ? encodedSeconds / elapsedEncodeSeconds 
+            : stats.encodingSpeed;
+          
+          updateProgress(lastProgressPercent, 'converting', true, encodedSeconds, avgSpeed, realDuration);
+          updateDebugInfo?.({ 
+            lastProgressValue: lastProgressPercent, 
+            encodedTime: encodedSeconds,
+            averageSpeed: avgSpeed,
+          });
         } else if (stats.encodedFrame !== null && stats.encodedFrame > 0) {
           // Fallback: animate progress for unknown duration
           updateProgress(lastProgressPercent, 'converting', true, null, stats.encodingSpeed, videoDurationRef.current);
@@ -963,22 +975,36 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
         );
         addLog?.('info', 'FFmpeg', `Fallback Komut: ${fallbackArgs.join(' ')}`);
         
-        // Update progress handler for fallback
+        // Update progress handler for fallback - same logic as main handler
         progressHandlerRef.current = (data: { progress: number; time?: number }) => {
           lastActivityRef.current = Date.now();
-          // Use progress.time if available (microseconds -> seconds)
+          // Only use progress.time (microseconds -> seconds), never data.progress
           if (data.time !== undefined && data.time > 0) {
             const encodedSeconds = data.time / 1_000_000;
-            lastProgressPercent = calculateProgressPercent(encodedSeconds);
-            updateProgress(lastProgressPercent, 'converting', true, encodedSeconds, null, videoDurationRef.current);
-            updateDebugInfo?.({ lastProgressValue: lastProgressPercent, encodedTime: encodedSeconds });
-          } else {
-            const normalizedProgress = data.progress;
-            if (normalizedProgress > 0 && normalizedProgress <= 1) {
-              lastProgressPercent = calculateProgressPercent(null);
-              updateProgress(lastProgressPercent, 'converting', true, null, null, videoDurationRef.current);
-              updateDebugInfo?.({ lastProgressValue: lastProgressPercent });
+            const realDuration = videoDurationRef.current;
+            
+            // Calculate percentage based on encodedSeconds / realDurationSeconds
+            // Progress range: 8-98%, never goes backwards
+            let newPercent = 10; // Start slightly higher for fallback
+            if (realDuration !== null && realDuration > 0.1) {
+              const ratio = Math.min(1, encodedSeconds / realDuration);
+              newPercent = Math.floor(8 + ratio * 90); // 8% to 98%
+              newPercent = Math.min(98, Math.max(10, newPercent));
             }
+            lastProgressPercent = Math.max(lastProgressPercent, newPercent);
+            
+            // Calculate average encoding speed
+            const elapsedEncodeSeconds = (Date.now() - execStartTime) / 1000;
+            const avgSpeed = elapsedEncodeSeconds > 0 
+              ? encodedSeconds / elapsedEncodeSeconds 
+              : null;
+            
+            updateProgress(lastProgressPercent, 'converting', true, encodedSeconds, avgSpeed, realDuration);
+            updateDebugInfo?.({ 
+              lastProgressValue: lastProgressPercent, 
+              encodedTime: encodedSeconds,
+              averageSpeed: avgSpeed,
+            });
           }
         };
         ffmpeg.on('progress', progressHandlerRef.current);
@@ -1021,9 +1047,32 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
             if (stats.duplicatedFrames !== null && stats.duplicatedFrames > maxDuplicatedFrames) {
               maxDuplicatedFrames = stats.duplicatedFrames;
             }
+            
+            // Update progress using same logic as main handler
             if (stats.encodedTime !== null) {
-              lastProgressPercent = calculateProgressPercent(stats.encodedTime);
-              updateProgress(lastProgressPercent, 'converting', true, stats.encodedTime, stats.encodingSpeed, videoDurationRef.current);
+              const encodedSeconds = stats.encodedTime;
+              const realDuration = videoDurationRef.current;
+              
+              let newPercent = lastProgressPercent;
+              if (realDuration !== null && realDuration > 0.1) {
+                const ratio = Math.min(1, encodedSeconds / realDuration);
+                newPercent = Math.floor(8 + ratio * 90);
+                newPercent = Math.min(98, Math.max(10, newPercent));
+              }
+              lastProgressPercent = Math.max(lastProgressPercent, newPercent);
+              
+              // Calculate average encoding speed
+              const elapsedEncodeSeconds = (Date.now() - execStartTime) / 1000;
+              const avgSpeed = elapsedEncodeSeconds > 0 
+                ? encodedSeconds / elapsedEncodeSeconds 
+                : stats.encodingSpeed;
+              
+              updateProgress(lastProgressPercent, 'converting', true, encodedSeconds, avgSpeed, realDuration);
+              updateDebugInfo?.({ 
+                lastProgressValue: lastProgressPercent, 
+                encodedTime: encodedSeconds,
+                averageSpeed: avgSpeed,
+              });
             }
           }
           addLog?.('info', 'FFmpeg', message);
