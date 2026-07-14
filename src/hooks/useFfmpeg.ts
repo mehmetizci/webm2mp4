@@ -656,7 +656,7 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
         ffmpegRef.current = ffmpegMT;
         logHandlerRef.current = loadLogHandler;
         engineTypeRef.current = 'multi-thread';
-        threadCountRef.current = 2;
+        threadCountRef.current = 4;
         
         updateDebugInfo?.({ 
           coreJsLoadStatus: 'loaded', 
@@ -664,7 +664,7 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
           ffmpegLoadStatus: 'loaded',
           engineType: 'multi-thread',
           loadingMethod: 'Multi-Thread',
-          threadCount: 2,
+          threadCount: 4,
           fallbackReason: null,
           mtCdnAttempt: 'success',
           mtLocalAttempt: null,
@@ -744,7 +744,7 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
           ffmpegRef.current = ffmpegMTLocal;
           logHandlerRef.current = loadLogHandler;
           engineTypeRef.current = 'multi-thread';
-          threadCountRef.current = 2;
+          threadCountRef.current = 4;
           
           updateDebugInfo?.({ 
             coreJsLoadStatus: 'loaded', 
@@ -752,7 +752,7 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
             ffmpegLoadStatus: 'loaded',
             engineType: 'multi-thread',
             loadingMethod: 'Multi-Thread',
-            threadCount: 2,
+            threadCount: 4,
             fallbackReason: null,
             mtCdnAttempt: 'failed',
             mtLocalAttempt: 'success',
@@ -967,7 +967,7 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
 
     // Use engine-specific thread count
     const actualEngine = engineTypeRef.current;
-    const threads = actualEngine === 'multi-thread' ? 2 : 1;
+    const threads = actualEngine === 'multi-thread' ? 4 : 1;
     
     addLog?.('info', 'Convert', logEngine(`Using engine: ${actualEngine}`));
     addLog?.('info', 'Convert', logEngine(`Thread count: ${threads}`));
