@@ -55,6 +55,10 @@ export interface ConversionDebugInfo {
   crossOriginIsolated: boolean | null;
   // FFmpeg engine type
   engineType: 'single-thread' | 'multi-thread' | null;
+  // Loading method (how FFmpeg was loaded)
+  loadingMethod: 'Multi-Thread' | 'Single-Thread' | null;
+  // Fallback reason (why multi-thread was skipped or failed)
+  fallbackReason: 'timeout' | 'sab_unavailable' | 'cross_origin_isolated_false' | 'worker_failed' | 'network_error' | 'unknown' | null;
   // Thread configuration
   threadCount: number | null;
   // Benchmark results
@@ -385,6 +389,10 @@ const initialDebugInfo: ConversionDebugInfo = {
   crossOriginIsolated: null,
   // FFmpeg engine type
   engineType: null,
+  // Loading method
+  loadingMethod: null,
+  // Fallback reason
+  fallbackReason: null,
   // Thread configuration
   threadCount: null,
   // Benchmark results

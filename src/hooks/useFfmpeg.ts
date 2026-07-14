@@ -55,9 +55,45 @@ function checkSharedArrayBufferSupport(): {
   };
 }
 
+// Create a promise that rejects after timeout
+function createTimeoutPromise(ms: number, message: string): Promise<never> {
+  return new Promise((_, reject) => {
+    setTimeout(() => reject(new Error(message)), ms);
+  });
+}
+
 // CDN URLs for FFmpeg cores
 const CORE_MT_CDN = 'https://cdn.jsdelivr.net/npm/@ffmpeg/core-mt@0.12.10/dist/umd';
 const CORE_ST_CDN = 'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.6/dist/umd';
+
+// Loading step logging
+type LoadingStep = 
+  | 'core_js'
+  | 'wasm' 
+  | 'worker'
+  | 'complete'
+  | 'timeout'
+  | 'network_error'
+  | 'unknown_error';
+
+function logLoadingStep(step: LoadingStep, details?: string): string {
+  switch (step) {
+    case 'core_js':
+      return 'Loading core.js...';
+    case 'wasm':
+      return 'Loading wasm...';
+    case 'worker':
+      return 'Loading worker...';
+    case 'complete':
+      return 'Load completed successfully';
+    case 'timeout':
+      return `Load timeout: ${details || 'unknown'}`;
+    case 'network_error':
+      return `Network error loading: ${details || 'unknown'}`;
+    case 'unknown_error':
+      return `Load failed: ${details || 'unknown'}`;
+  }
+}
 
 interface FFmpegLogStats {
   encodedFrame: number | null;
@@ -432,10 +468,6 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
     updateProgress(0, 'loading', false);
     updateDebugInfo?.({ ffmpegLoadStatus: 'loading' });
 
-    const loadTimeout = setTimeout(() => {
-      addLog?.('warning', 'Load', 'FFmpeg yükleme 10 saniyeyi aştı');
-    }, 10000);
-
     // Check SharedArrayBuffer support for multi-threading
     const sabSupport = checkSharedArrayBufferSupport();
     updateDebugInfo?.({ 
@@ -446,32 +478,50 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
     addLog?.('info', 'Load', `SharedArrayBuffer: ${sabSupport.available ? 'Aktif' : 'Pasif'}`);
     addLog?.('info', 'Load', `crossOriginIsolated: ${sabSupport.crossOriginIsolated}`);
 
-    // Try multi-thread first if supported
+    // Try multi-thread first ONLY if fully supported
     let loadSuccess = false;
     let loadedEngineType: FFmpegEngineType = 'single-thread';
+    let fallbackReason: 'timeout' | 'sab_unavailable' | 'cross_origin_isolated_false' | 'worker_failed' | 'network_error' | 'unknown' | null = null;
     
-    if (sabSupport.available) {
+    if (sabSupport.crossOriginIsolated && sabSupport.available) {
       addLog?.('info', 'Load', 'Multi-Thread FFmpeg yükleniyor...');
       updateDebugInfo?.({ 
         ffmpegLoadStatus: 'loading',
         engineType: 'multi-thread',
       });
       
+      let ffmpegMT: FFmpeg | null = null;
+      let loadLogHandler: ((data: { message: string }) => void) | null = null;
+      
       try {
-        const ffmpegMT = new FFmpeg();
+        ffmpegMT = new FFmpeg();
         
-        const loadLogHandler = ({ message }: { message: string }) => {
+        loadLogHandler = ({ message }: { message: string }) => {
           console.log('[FFmpeg MT]', message);
+          // Log specific loading steps
+          if (message.includes('fetch') || message.includes('ffmpeg-core.js')) {
+            addLog?.('info', 'Load', logLoadingStep('core_js'));
+          } else if (message.includes('ffmpeg-core.wasm')) {
+            addLog?.('info', 'Load', logLoadingStep('wasm'));
+          } else if (message.includes('worker') || message.includes('ffmpeg-core.worker')) {
+            addLog?.('info', 'Load', logLoadingStep('worker'));
+          }
         };
         ffmpegMT.on('log', loadLogHandler);
         
-        // Load multi-thread core with all URLs
-        await ffmpegMT.load({
+        // Create load promise with 10-second timeout
+        const loadPromise = ffmpegMT.load({
           coreURL: `${CORE_MT_CDN}/ffmpeg-core.js`,
           wasmURL: `${CORE_MT_CDN}/ffmpeg-core.wasm`,
           workerURL: `${CORE_MT_CDN}/ffmpeg-core.worker.js`,
         });
         
+        const timeoutPromise = createTimeoutPromise(10000, 'MT_LOAD_TIMEOUT');
+        
+        // Race between load and timeout
+        await Promise.race([loadPromise, timeoutPromise]);
+        
+        // Load successful
         ffmpegRef.current = ffmpegMT;
         logHandlerRef.current = loadLogHandler;
         engineTypeRef.current = 'multi-thread';
@@ -482,46 +532,88 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
           wasmLoadStatus: 'loaded',
           ffmpegLoadStatus: 'loaded',
           engineType: 'multi-thread',
+          loadingMethod: 'Multi-Thread',
+          fallbackReason: null,
         });
         
         addLog?.('success', 'Load', 'Multi-Thread FFmpeg yüklendi');
+        addLog?.('info', 'Load', logLoadingStep('complete'));
         loadSuccess = true;
       } catch (mtErr) {
         const mtErrorMessage = mtErr instanceof Error ? mtErr.message : String(mtErr);
-        addLog?.('warning', 'Load', `Multi-Thread yüklenemedi: ${mtErrorMessage}`);
+        
+        // Determine fallback reason
+        if (mtErrorMessage.includes('MT_LOAD_TIMEOUT') || mtErrorMessage.includes('timeout')) {
+          fallbackReason = 'timeout';
+          addLog?.('warning', 'Load', `Multi-thread timeout (10sn): ${mtErrorMessage}`);
+        } else if (mtErrorMessage.includes('fetch') || mtErrorMessage.includes('network') || mtErrorMessage.includes('Failed to')) {
+          fallbackReason = 'network_error';
+          addLog?.('warning', 'Load', `Multi-thread ağ hatası: ${mtErrorMessage}`);
+        } else if (mtErrorMessage.includes('worker')) {
+          fallbackReason = 'worker_failed';
+          addLog?.('warning', 'Load', `Multi-thread worker hatası: ${mtErrorMessage}`);
+        } else {
+          fallbackReason = 'unknown';
+          addLog?.('warning', 'Load', `Multi-thread yüklenemedi: ${mtErrorMessage}`);
+        }
+        
+        addLog?.('info', 'Load', `Fallback: ${fallbackReason}`);
         addLog?.('info', 'Load', 'Single-Thread FFmpeg deneniyor...');
         
         // Clean up failed MT instance
         try {
-          ffmpegRef.current?.terminate();
+          ffmpegMT?.terminate();
         } catch {
           // Ignore cleanup errors
         }
         ffmpegRef.current = null;
       }
+    } else {
+      // Skip MT entirely - not supported
+      if (!sabSupport.crossOriginIsolated) {
+        fallbackReason = 'cross_origin_isolated_false';
+        addLog?.('info', 'Load', 'crossOriginIsolated=false, Multi-Thread atlanıyor');
+      } else if (!sabSupport.available) {
+        fallbackReason = 'sab_unavailable';
+        addLog?.('info', 'Load', 'SharedArrayBuffer yok, Multi-Thread atlanıyor');
+      }
+      addLog?.('info', 'Load', 'Single-Thread FFmpeg kullanılıyor');
     }
     
     // Fallback to single-thread
     if (!loadSuccess) {
-      addLog?.('info', 'Load', 'Single-Thread FFmpeg yükleniyor...');
       updateDebugInfo?.({ 
         ffmpegLoadStatus: 'loading',
         engineType: 'single-thread',
+        loadingMethod: 'Single-Thread',
+        fallbackReason,
       });
       
+      let ffmpegST: FFmpeg | null = null;
+      let loadLogHandler: ((data: { message: string }) => void) | null = null;
+      
       try {
-        const ffmpegST = new FFmpeg();
+        ffmpegST = new FFmpeg();
         
-        const loadLogHandler = ({ message }: { message: string }) => {
+        loadLogHandler = ({ message }: { message: string }) => {
           console.log('[FFmpeg ST]', message);
+          if (message.includes('fetch') || message.includes('ffmpeg-core.js')) {
+            addLog?.('info', 'Load', logLoadingStep('core_js'));
+          } else if (message.includes('ffmpeg-core.wasm')) {
+            addLog?.('info', 'Load', logLoadingStep('wasm'));
+          }
         };
         ffmpegST.on('log', loadLogHandler);
         
-        // Load single-thread core from CDN
-        await ffmpegST.load({
+        // Single-thread load with 15-second timeout (slower but more reliable)
+        const loadPromise = ffmpegST.load({
           coreURL: `${CORE_ST_CDN}/ffmpeg-core.js`,
           wasmURL: `${CORE_ST_CDN}/ffmpeg-core.wasm`,
         });
+        
+        const timeoutPromise = createTimeoutPromise(15000, 'ST_LOAD_TIMEOUT');
+        
+        await Promise.race([loadPromise, timeoutPromise]);
         
         ffmpegRef.current = ffmpegST;
         logHandlerRef.current = loadLogHandler;
@@ -533,6 +625,7 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
           wasmLoadStatus: 'loaded',
           ffmpegLoadStatus: 'loaded',
           engineType: 'single-thread',
+          loadingMethod: 'Single-Thread',
         });
         
         addLog?.('success', 'Load', 'Single-Thread FFmpeg yüklendi');
@@ -545,6 +638,7 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
           ffmpegLoadStatus: 'error',
           errorCode: 'FFMPEG_LOAD_ERROR',
           errorMessage: stErrorMessage,
+          loadingMethod: 'None',
         });
         
         let errorMessage = 'Dönüştürücü yüklenemedi.';
@@ -565,13 +659,11 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
         };
         setError(errorObj);
         updateProgress(0, 'error', false);
-        clearTimeout(loadTimeout);
         setIsLoading(false);
         return false;
       }
     }
 
-    clearTimeout(loadTimeout);
     setIsLoaded(true);
     updateProgress(0, 'idle', false);
     addLog?.('success', 'Load', `FFmpeg hazır (${loadedEngineType === 'multi-thread' ? 'Multi-Thread' : 'Single-Thread'})`);
