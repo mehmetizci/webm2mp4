@@ -1017,7 +1017,7 @@ export function WebmConverter() {
         )}
 
         {showResult && (
-          <ConversionResult result={result} onReset={handleReset} />
+          <ConversionResult result={result} onReset={handleReset} debugInfo={debugInfo} />
         )}
 
         {showError && (

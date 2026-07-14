@@ -53,6 +53,7 @@ export interface ConversionDebugInfo {
   // Multi-threading support detection
   sharedArrayBufferAvailable: boolean | null;
   crossOriginIsolated: boolean | null;
+  cpuCores: number | null;
   // FFmpeg engine type
   engineType: 'single-thread' | 'multi-thread' | null;
   // Loading method (how FFmpeg was loaded)
@@ -394,6 +395,7 @@ const initialDebugInfo: ConversionDebugInfo = {
   // Multi-threading support detection
   sharedArrayBufferAvailable: null,
   crossOriginIsolated: null,
+  cpuCores: null,
   // FFmpeg engine type
   engineType: null,
   // Loading method

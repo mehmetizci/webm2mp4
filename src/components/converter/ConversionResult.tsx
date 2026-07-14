@@ -1,13 +1,15 @@
 'use client';
 
-import { CheckCircle, Download, RefreshCw, Film, ArrowDownCircle, Clock, Gauge, Zap, Globe, Volume, VolumeX } from 'lucide-react';
+import { CheckCircle, Download, RefreshCw, Film, ArrowDownCircle, Clock, Gauge, Zap, Globe, Volume, VolumeX, Cpu } from 'lucide-react';
 import type { ConversionResult as ResultType } from '@/types/converter';
+import type { ConversionDebugInfo } from '@/hooks/useDebugLog';
 import { downloadBlob } from '@/lib/file-utils';
 import { formatBitrate } from '@/lib/formatBitrate';
 
 interface ConversionResultProps {
   result: ResultType;
   onReset: () => void;
+  debugInfo?: ConversionDebugInfo | null;
 }
 
 function formatBytes(bytes: number): string {
@@ -29,7 +31,7 @@ function formatConversionTime(seconds: number): string {
   return `${mins} dk ${secs} sn`;
 }
 
-export function ConversionResult({ result, onReset }: ConversionResultProps) {
+export function ConversionResult({ result, onReset, debugInfo }: ConversionResultProps) {
   const handleDownload = () => {
     downloadBlob(result.blob, result.fileName);
   };
@@ -37,6 +39,11 @@ export function ConversionResult({ result, onReset }: ConversionResultProps) {
   const engineLabel = result.engine === 'webcodecs' ? 'WebCodecs' : 'FFmpeg WebAssembly';
   const EngineIcon = result.engine === 'webcodecs' ? Zap : Globe;
   const AudioIcon = result.hasAudio ? Volume : VolumeX;
+  
+  // FFmpeg specific info
+  const ffmpegEngineType = debugInfo?.engineType === 'multi-thread' ? 'Multi-Thread' : 'Single-Thread';
+  const ffmpegThreadCount = debugInfo?.threadCount;
+  const ffmpegCpuCores = debugInfo?.cpuCores;
 
   return (
     <div className="flex flex-col items-center w-full min-h-[280px] sm:min-h-[320px] bg-emerald-50/50 rounded-2xl p-6 space-y-6">
@@ -66,6 +73,13 @@ export function ConversionResult({ result, onReset }: ConversionResultProps) {
           <EngineIcon className="w-3.5 h-3.5 mr-1.5" />
           {engineLabel}
         </span>
+        {/* FFmpeg thread info */}
+        {result.engine === 'ffmpeg-wasm' && ffmpegThreadCount && (
+          <span className="inline-flex items-center px-3 py-1.5 rounded-lg bg-slate-100 text-slate-700 text-xs font-medium">
+            <Cpu className="w-3.5 h-3.5 mr-1.5" />
+            {ffmpegCpuCores} cores / {ffmpegThreadCount} threads
+          </span>
+        )}
         <span className="inline-flex items-center px-3 py-1.5 rounded-lg bg-emerald-100 text-emerald-700 text-xs font-medium">
           <Film className="w-3.5 h-3.5 mr-1.5" />
           MP4
@@ -120,6 +134,25 @@ export function ConversionResult({ result, onReset }: ConversionResultProps) {
                 </div>
                 <span className="font-mono text-slate-700">{result.averageSpeed.toFixed(2)}x</span>
               </div>
+            )}
+            {/* FFmpeg specific encoding info */}
+            {result.engine === 'ffmpeg-wasm' && ffmpegThreadCount && (
+              <>
+                <div className="flex items-center justify-between text-xs">
+                  <div className="flex items-center gap-1.5 text-slate-500">
+                    <Cpu className="w-3.5 h-3.5" />
+                    <span>Motor</span>
+                  </div>
+                  <span className="font-mono text-slate-700">{ffmpegEngineType}</span>
+                </div>
+                <div className="flex items-center justify-between text-xs">
+                  <div className="flex items-center gap-1.5 text-slate-500">
+                    <Zap className="w-3.5 h-3.5" />
+                    <span>Thread</span>
+                  </div>
+                  <span className="font-mono text-slate-700">{ffmpegThreadCount}</span>
+                </div>
+              </>
             )}
             {/* Audio status */}
             <div className="flex items-center justify-between text-xs">

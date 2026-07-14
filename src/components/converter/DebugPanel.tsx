@@ -247,6 +247,10 @@ export function DebugPanel({ debugInfo, isVisible, webCodecsDetection, selectedE
           {/* FFmpeg Engine Section */}
           <DebugSection title="FFmpeg Motor">
             <DebugRow 
+              label="CPU Cores" 
+              value={debugInfo.cpuCores !== null ? `${debugInfo.cpuCores}` : null} 
+            />
+            <DebugRow 
               label="crossOriginIsolated" 
               value={debugInfo.crossOriginIsolated !== null ? (debugInfo.crossOriginIsolated ? 'true' : 'false') : null} 
               status={debugInfo.crossOriginIsolated === true ? 'completed' : 'idle'}
@@ -257,17 +261,12 @@ export function DebugPanel({ debugInfo, isVisible, webCodecsDetection, selectedE
               status={debugInfo.sharedArrayBufferAvailable === true ? 'completed' : 'idle'}
             />
             <DebugRow 
-              label="Loading Method" 
-              value={debugInfo.loadingMethod || null} 
-              status={debugInfo.loadingMethod === 'Multi-Thread' ? 'completed' : debugInfo.loadingMethod === 'Single-Thread' ? 'idle' : undefined}
-            />
-            <DebugRow 
-              label="Actual Engine" 
-              value={debugInfo.engineType || null} 
+              label="Engine" 
+              value={debugInfo.engineType === 'multi-thread' ? 'multi-thread' : debugInfo.engineType === 'single-thread' ? 'single-thread' : null} 
               status={debugInfo.engineType === 'multi-thread' ? 'completed' : debugInfo.engineType === 'single-thread' ? 'idle' : undefined}
             />
             <DebugRow 
-              label="Thread Count" 
+              label="Selected Threads" 
               value={debugInfo.threadCount !== null ? `${debugInfo.threadCount}` : null} 
             />
             <DebugRow 
@@ -778,6 +777,18 @@ export function DebugPanel({ debugInfo, isVisible, webCodecsDetection, selectedE
           {/* Encoding Stats */}
           {(debugInfo.encodedTime !== null || debugInfo.encodingSpeed !== null || debugInfo.ffmpegCommand) && (
             <DebugSection title="Encoding İstatistikleri">
+              {/* FFmpeg Engine Info */}
+              <div className="mb-2">
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="text-slate-500 text-xs">
+                    FFmpeg {debugInfo.engineType === 'multi-thread' ? 'Multi-Thread' : 'Single-Thread'}:
+                  </span>
+                  <span className="text-xs bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded">
+                    {debugInfo.cpuCores !== null ? `CPU: ${debugInfo.cpuCores}` : ''}
+                    {debugInfo.threadCount !== null ? ` / Threads: ${debugInfo.threadCount}` : ''}
+                  </span>
+                </div>
+              </div>
               {debugInfo.ffmpegCommand && (
                 <div className="mb-2">
                   <div className="flex items-center gap-2 mb-1">

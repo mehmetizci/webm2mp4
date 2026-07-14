@@ -55,6 +55,36 @@ function checkSharedArrayBufferSupport(): {
   };
 }
 
+// Get CPU core count from navigator.hardwareConcurrency
+function getCPUCores(): number {
+  if (typeof navigator !== 'undefined' && 'hardwareConcurrency' in navigator) {
+    return navigator.hardwareConcurrency ?? 2;
+  }
+  return 2; // Default fallback
+}
+
+// Determine optimal thread count based on CPU cores and multi-threading support
+// Rules:
+// - Multi-Thread requires: crossOriginIsolated=true, SharedArrayBuffer available, core-mt loaded
+// - If MT available and hardwareConcurrency <= 2: threads = 2
+// - If MT available and hardwareConcurrency >= 4: threads = 4 (max)
+// - If MT not available (single-thread fallback): threads = 1
+function determineThreadCount(
+  isMultiThreadSupported: boolean,
+  cpuCores: number
+): { threads: number; engineType: FFmpegEngineType; reason: string } {
+  if (isMultiThreadSupported) {
+    if (cpuCores <= 2) {
+      return { threads: 2, engineType: 'multi-thread', reason: `MT + ${cpuCores} cores → 2 threads` };
+    } else {
+      // cpuCores >= 4, cap at 4 threads maximum
+      return { threads: 4, engineType: 'multi-thread', reason: `MT + ${cpuCores} cores → 4 threads (max)` };
+    }
+  } else {
+    return { threads: 1, engineType: 'single-thread', reason: `Single-Thread fallback → 1 thread` };
+  }
+}
+
 // Create a promise that rejects after timeout
 function createTimeoutPromise(ms: number, message: string): Promise<never> {
   return new Promise((_, reject) => {
@@ -192,14 +222,6 @@ function getDeviceMemory(): number | null {
     return (navigator as { deviceMemory?: number }).deviceMemory || null;
   }
   return null;
-}
-
-// Get CPU cores
-function getCPUCores(): number {
-  if (typeof navigator !== 'undefined' && 'hardwareConcurrency' in navigator) {
-    return navigator.hardwareConcurrency || 4;
-  }
-  return 4;
 }
 
 // Parse FFmpeg progress line
@@ -529,13 +551,23 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
     
     // Check SharedArrayBuffer support for multi-threading
     const sabSupport = checkSharedArrayBufferSupport();
+    
+    // Get CPU core count
+    const cpuCores = getCPUCores();
+    
+    // Determine thread count based on MT support and CPU cores
+    const threadConfig = determineThreadCount(sabSupport.available, cpuCores);
+    
     updateDebugInfo?.({ 
       sharedArrayBufferAvailable: sabSupport.available,
       crossOriginIsolated: sabSupport.crossOriginIsolated,
+      cpuCores: cpuCores,
     });
     
+    addLog?.('info', 'Load', logEngine(`CPU Cores: ${cpuCores}`));
     addLog?.('info', 'Load', logEngine(`crossOriginIsolated=${sabSupport.crossOriginIsolated}`));
     addLog?.('info', 'Load', logEngine(`SharedArrayBuffer=${sabSupport.available ? 'true' : 'false'}`));
+    addLog?.('info', 'Load', logEngine(`Thread selection: ${threadConfig.reason}`));
 
     // Try multi-thread first ONLY if fully supported
     let loadSuccess = false;
@@ -655,16 +687,16 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
         // Success!
         ffmpegRef.current = ffmpegMT;
         logHandlerRef.current = loadLogHandler;
-        engineTypeRef.current = 'multi-thread';
-        threadCountRef.current = 4;
+        engineTypeRef.current = threadConfig.engineType;
+        threadCountRef.current = threadConfig.threads;
         
         updateDebugInfo?.({ 
           coreJsLoadStatus: 'loaded', 
           wasmLoadStatus: 'loaded',
           ffmpegLoadStatus: 'loaded',
-          engineType: 'multi-thread',
-          loadingMethod: 'Multi-Thread',
-          threadCount: 4,
+          engineType: threadConfig.engineType,
+          loadingMethod: threadConfig.engineType === 'multi-thread' ? 'Multi-Thread' : 'Single-Thread',
+          threadCount: threadConfig.threads,
           fallbackReason: null,
           mtCdnAttempt: 'success',
           mtLocalAttempt: null,
@@ -672,9 +704,9 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
         });
         
         addLog?.('info', 'Load', logEngine(`MT CDN yükleme basarili`));
-        addLog?.('info', 'Load', logEngine(`Actual engine: multi-thread`));
-        addLog?.('info', 'Load', logEngine(`Thread count: 2`));
-        addLog?.('success', 'Load', 'Multi-Thread FFmpeg yüklendi');
+        addLog?.('info', 'Load', logEngine(`Actual engine: ${threadConfig.engineType}`));
+        addLog?.('info', 'Load', logEngine(`Thread count: ${threadConfig.threads}`));
+        addLog?.('success', 'Load', `${threadConfig.engineType === 'multi-thread' ? 'Multi-Thread' : 'Single-Thread'} FFmpeg yüklendi (${threadConfig.threads} threads)`);
         loadSuccess = true;
         
       } catch (mtErr) {
@@ -743,16 +775,16 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
           // Local success!
           ffmpegRef.current = ffmpegMTLocal;
           logHandlerRef.current = loadLogHandler;
-          engineTypeRef.current = 'multi-thread';
-          threadCountRef.current = 4;
+          engineTypeRef.current = threadConfig.engineType;
+          threadCountRef.current = threadConfig.threads;
           
           updateDebugInfo?.({ 
             coreJsLoadStatus: 'loaded', 
             wasmLoadStatus: 'loaded',
             ffmpegLoadStatus: 'loaded',
-            engineType: 'multi-thread',
-            loadingMethod: 'Multi-Thread',
-            threadCount: 4,
+            engineType: threadConfig.engineType,
+            loadingMethod: threadConfig.engineType === 'multi-thread' ? 'Multi-Thread' : 'Single-Thread',
+            threadCount: threadConfig.threads,
             fallbackReason: null,
             mtCdnAttempt: 'failed',
             mtLocalAttempt: 'success',
@@ -760,9 +792,9 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
           });
           
           addLog?.('info', 'Load', logEngine(`MT Local yükleme basarili`));
-          addLog?.('info', 'Load', logEngine(`Actual engine: multi-thread`));
-          addLog?.('info', 'Load', logEngine(`Thread count: 2`));
-          addLog?.('success', 'Load', 'Multi-Thread FFmpeg (local) yüklendi');
+          addLog?.('info', 'Load', logEngine(`Actual engine: ${threadConfig.engineType}`));
+          addLog?.('info', 'Load', logEngine(`Thread count: ${threadConfig.threads}`));
+          addLog?.('success', 'Load', `${threadConfig.engineType === 'multi-thread' ? 'Multi-Thread' : 'Single-Thread'} FFmpeg (local) yüklendi (${threadConfig.threads} threads)`);
           loadSuccess = true;
           
         } catch (localErr) {
@@ -803,9 +835,9 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
       
       updateDebugInfo?.({ 
         ffmpegLoadStatus: 'loading',
-        engineType: 'single-thread',
-        loadingMethod: 'Single-Thread',
-        threadCount: 1,
+        engineType: threadConfig.engineType,
+        loadingMethod: threadConfig.engineType === 'multi-thread' ? 'Multi-Thread' : 'Single-Thread',
+        threadCount: threadConfig.threads,
         fallbackReason,
         fallbackErrorMessage,
       });
@@ -872,21 +904,21 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
         
         ffmpegRef.current = ffmpegST;
         logHandlerRef.current = loadLogHandler;
-        engineTypeRef.current = 'single-thread';
-        threadCountRef.current = 1;
+        engineTypeRef.current = threadConfig.engineType;
+        threadCountRef.current = threadConfig.threads;
         
         updateDebugInfo?.({ 
           coreJsLoadStatus: 'loaded', 
           wasmLoadStatus: 'loaded',
           ffmpegLoadStatus: 'loaded',
-          engineType: 'single-thread',
-          loadingMethod: 'Single-Thread',
-          threadCount: 1,
+          engineType: threadConfig.engineType,
+          loadingMethod: threadConfig.engineType === 'multi-thread' ? 'Multi-Thread' : 'Single-Thread',
+          threadCount: threadConfig.threads,
         });
         
-        addLog?.('info', 'Load', logEngine(`Actual engine: single-thread`));
-        addLog?.('info', 'Load', logEngine(`Thread count: 1`));
-        addLog?.('success', 'Load', 'Single-Thread FFmpeg yüklendi');
+        addLog?.('info', 'Load', logEngine(`Actual engine: ${threadConfig.engineType}`));
+        addLog?.('info', 'Load', logEngine(`Thread count: ${threadConfig.threads}`));
+        addLog?.('success', 'Load', `${threadConfig.engineType === 'multi-thread' ? 'Multi-Thread' : 'Single-Thread'} FFmpeg yüklendi (${threadConfig.threads} threads)`);
         loadSuccess = true;
         
       } catch (stErr) {
@@ -931,7 +963,7 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
 
     setIsLoaded(true);
     updateProgress(0, 'idle', false);
-    addLog?.('success', 'Load', logEngine(`FFmpeg ready (${engineTypeRef.current === 'multi-thread' ? 'Multi-Thread' : 'Single-Thread'})`));
+    addLog?.('success', 'Load', logEngine(`FFmpeg ready (${engineTypeRef.current === 'multi-thread' ? 'Multi-Thread' : 'Single-Thread'}, ${threadCountRef.current} threads)`));
     return true;
   }, [isLoading, updateProgress, addLog, updateDebugInfo, normalizeError]);
 
@@ -965,9 +997,9 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
     const bufSize = Math.ceil(effectiveMaxRate * 2); // bufsize = 2x maxrate
     const scaleFilter = getScaleFilter(sourceWidth);
 
-    // Use engine-specific thread count
+    // Use engine-specific thread count from threadCountRef
     const actualEngine = engineTypeRef.current;
-    const threads = actualEngine === 'multi-thread' ? 4 : 1;
+    const threads = threadCountRef.current;
     
     addLog?.('info', 'Convert', logEngine(`Using engine: ${actualEngine}`));
     addLog?.('info', 'Convert', logEngine(`Thread count: ${threads}`));
