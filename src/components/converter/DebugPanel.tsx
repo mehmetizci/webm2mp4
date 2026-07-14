@@ -244,6 +244,39 @@ export function DebugPanel({ debugInfo, isVisible, webCodecsDetection, selectedE
             )}
           </DebugSection>
 
+          {/* FFmpeg Engine Section */}
+          <DebugSection title="FFmpeg Motor">
+            <DebugRow 
+              label="crossOriginIsolated" 
+              value={debugInfo.crossOriginIsolated !== null ? (debugInfo.crossOriginIsolated ? 'true' : 'false') : null} 
+              status={debugInfo.crossOriginIsolated === true ? 'completed' : 'idle'}
+            />
+            <DebugRow 
+              label="SharedArrayBuffer" 
+              value={debugInfo.sharedArrayBufferAvailable !== null ? (debugInfo.sharedArrayBufferAvailable ? 'true' : 'false') : null} 
+              status={debugInfo.sharedArrayBufferAvailable === true ? 'completed' : 'idle'}
+            />
+            <DebugRow 
+              label="Loading Method" 
+              value={debugInfo.loadingMethod || null} 
+              status={debugInfo.loadingMethod === 'Multi-Thread' ? 'completed' : debugInfo.loadingMethod === 'Single-Thread' ? 'idle' : undefined}
+            />
+            <DebugRow 
+              label="Actual Engine" 
+              value={debugInfo.engineType || null} 
+              status={debugInfo.engineType === 'multi-thread' ? 'completed' : debugInfo.engineType === 'single-thread' ? 'idle' : undefined}
+            />
+            <DebugRow 
+              label="Thread Count" 
+              value={debugInfo.threadCount !== null ? `${debugInfo.threadCount}` : null} 
+            />
+            <DebugRow 
+              label="Fallback Reason" 
+              value={debugInfo.fallbackReason || '-'} 
+              status={debugInfo.fallbackReason ? 'warning' : 'completed'}
+            />
+          </DebugSection>
+
           {/* Input Decoder Support */}
           <DebugSection title="Giriş Decoder Desteği">
             {/* Input video codec info from Mediabunny */}
@@ -710,7 +743,16 @@ export function DebugPanel({ debugInfo, isVisible, webCodecsDetection, selectedE
             <DebugSection title="Encoding İstatistikleri">
               {debugInfo.ffmpegCommand && (
                 <div className="mb-2">
-                  <span className="text-slate-500 text-xs block mb-1">FFmpeg Komutu:</span>
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="text-slate-500 text-xs">
+                      FFmpeg {debugInfo.engineType === 'multi-thread' ? 'Multi-Thread' : 'Single-Thread'}:
+                    </span>
+                    {debugInfo.threadCount && (
+                      <span className="text-xs bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded">
+                        Threads: {debugInfo.threadCount}
+                      </span>
+                    )}
+                  </div>
                   <div className="bg-slate-900 text-emerald-400 p-2 rounded-lg font-mono text-xs break-all whitespace-pre-wrap">
                     {debugInfo.ffmpegCommand}
                   </div>
