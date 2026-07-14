@@ -11,6 +11,9 @@ import type {
 } from '@/types/converter';
 import { getOutputFileName } from '@/lib/file-utils';
 
+// FFmpeg engine types
+export type FFmpegEngineType = 'multi-thread' | 'single-thread';
+
 // Generate unique file names for each conversion job
 function generateInputFileName(jobId: string): string {
   return `input-${jobId}.webm`;
@@ -34,6 +37,27 @@ const STALL_TIMEOUT_MS = 90000; // 90 seconds stall detection - activity-based
 const MAX_EXECUTION_TIME_MS = 30 * 60 * 1000; // 30 minutes absolute safety limit
 const DUPLICATE_FRAME_WARNING_THRESHOLD = 100;
 const DUPLICATE_FRAME_ABORT_THRESHOLD = 1000;
+
+// SharedArrayBuffer detection for multi-threading support
+function checkSharedArrayBufferSupport(): { 
+  available: boolean; 
+  crossOriginIsolated: boolean 
+} {
+  const crossOriginIsolated = typeof window !== 'undefined' 
+    ? (window as unknown as { crossOriginIsolated?: boolean }).crossOriginIsolated ?? false
+    : false;
+  
+  const hasSharedArrayBuffer = typeof SharedArrayBuffer !== 'undefined';
+  
+  return {
+    available: crossOriginIsolated && hasSharedArrayBuffer,
+    crossOriginIsolated,
+  };
+}
+
+// CDN URLs for FFmpeg cores
+const CORE_MT_CDN = 'https://cdn.jsdelivr.net/npm/@ffmpeg/core-mt@0.12.10/dist/umd';
+const CORE_ST_CDN = 'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.6/dist/umd';
 
 interface FFmpegLogStats {
   encodedFrame: number | null;
@@ -141,6 +165,8 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
   const currentInputFileRef = useRef<string>(''); // Current input file name
   const currentOutputFileRef = useRef<string>(''); // Current output file name
   const ffmpegCommandRef = useRef<string[]>([]); // Store the FFmpeg command for debug
+  const engineTypeRef = useRef<FFmpegEngineType>('single-thread'); // Current engine type
+  const threadCountRef = useRef<number>(1); // Current thread count (1, 2, 4, or 0 for auto)
   
   const [isLoaded, setIsLoaded] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -410,67 +436,146 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
       addLog?.('warning', 'Load', 'FFmpeg yükleme 10 saniyeyi aştı');
     }, 10000);
 
-    try {
-      const ffmpeg = new FFmpeg();
-      addLog?.('info', 'Load', 'FFmpeg başlatılıyor');
+    // Check SharedArrayBuffer support for multi-threading
+    const sabSupport = checkSharedArrayBufferSupport();
+    updateDebugInfo?.({ 
+      sharedArrayBufferAvailable: sabSupport.available,
+      crossOriginIsolated: sabSupport.crossOriginIsolated,
+    });
+    
+    addLog?.('info', 'Load', `SharedArrayBuffer: ${sabSupport.available ? 'Aktif' : 'Pasif'}`);
+    addLog?.('info', 'Load', `crossOriginIsolated: ${sabSupport.crossOriginIsolated}`);
 
-      const loadLogHandler = ({ message }: { message: string }) => {
-        console.log('[FFmpeg]', message);
-      };
-      ffmpeg.on('log', loadLogHandler);
-      logHandlerRef.current = loadLogHandler;
-
-      updateDebugInfo?.({ coreJsLoadStatus: 'loading', wasmLoadStatus: 'loading' });
-      addLog?.('info', 'Load', 'Core JS yükleniyor');
-      
-      await ffmpeg.load({
-        coreURL: '/ffmpeg/ffmpeg-core.js',
-        wasmURL: '/ffmpeg/ffmpeg-core.wasm',
-      });
-      
-      updateDebugInfo?.({ coreJsLoadStatus: 'loaded', wasmLoadStatus: 'loaded', ffmpegLoadStatus: 'loaded' });
-      addLog?.('success', 'Load', 'Core JS yüklendi');
-      addLog?.('success', 'Load', 'WASM yüklendi');
-
-      ffmpegRef.current = ffmpeg;
-      setIsLoaded(true);
-      updateProgress(0, 'idle', false);
-      addLog?.('success', 'Load', 'FFmpeg hazır');
-      return true;
-    } catch (err) {
-      const { message, stack } = normalizeError(err);
-      
-      addLog?.('error', 'Load', `LOAD_FAILED: ${message}`);
+    // Try multi-thread first if supported
+    let loadSuccess = false;
+    let loadedEngineType: FFmpegEngineType = 'single-thread';
+    
+    if (sabSupport.available) {
+      addLog?.('info', 'Load', 'Multi-Thread FFmpeg yükleniyor...');
       updateDebugInfo?.({ 
-        ffmpegLoadStatus: 'error',
-        errorCode: 'FFMPEG_LOAD_ERROR',
-        errorMessage: message,
-        errorStack: stack,
+        ffmpegLoadStatus: 'loading',
+        engineType: 'multi-thread',
       });
       
-      let errorMessage = 'Dönüştürücü yüklenemedi.';
-      let errorCode = 'FFMPEG_LOAD_ERROR';
-      
-      if (message.includes('fetch') || message.includes('network') || message.includes('Failed to') || message.includes('404')) {
-        errorMessage = 'FFmpeg dosyaları yüklenemedi. Lütfen internet bağlantınızı kontrol edin.';
-        errorCode = 'FFMPEG_FETCH_ERROR';
-      } else if (message.includes('WASM') || message.includes('wasm')) {
-        errorMessage = 'WebAssembly yüklenemedi. Lütfen sayfayı yenileyin.';
-        errorCode = 'WASM_LOAD_ERROR';
+      try {
+        const ffmpegMT = new FFmpeg();
+        
+        const loadLogHandler = ({ message }: { message: string }) => {
+          console.log('[FFmpeg MT]', message);
+        };
+        ffmpegMT.on('log', loadLogHandler);
+        
+        // Load multi-thread core with all URLs
+        await ffmpegMT.load({
+          coreURL: `${CORE_MT_CDN}/ffmpeg-core.js`,
+          wasmURL: `${CORE_MT_CDN}/ffmpeg-core.wasm`,
+          workerURL: `${CORE_MT_CDN}/ffmpeg-core.worker.js`,
+        });
+        
+        ffmpegRef.current = ffmpegMT;
+        logHandlerRef.current = loadLogHandler;
+        engineTypeRef.current = 'multi-thread';
+        loadedEngineType = 'multi-thread';
+        
+        updateDebugInfo?.({ 
+          coreJsLoadStatus: 'loaded', 
+          wasmLoadStatus: 'loaded',
+          ffmpegLoadStatus: 'loaded',
+          engineType: 'multi-thread',
+        });
+        
+        addLog?.('success', 'Load', 'Multi-Thread FFmpeg yüklendi');
+        loadSuccess = true;
+      } catch (mtErr) {
+        const mtErrorMessage = mtErr instanceof Error ? mtErr.message : String(mtErr);
+        addLog?.('warning', 'Load', `Multi-Thread yüklenemedi: ${mtErrorMessage}`);
+        addLog?.('info', 'Load', 'Single-Thread FFmpeg deneniyor...');
+        
+        // Clean up failed MT instance
+        try {
+          ffmpegRef.current?.terminate();
+        } catch {
+          // Ignore cleanup errors
+        }
+        ffmpegRef.current = null;
       }
-      
-      const errorObj: ConversionError = {
-        code: errorCode,
-        message: errorMessage,
-        technical: `ffmpeg.load() başarısız\n${message}`,
-      };
-      setError(errorObj);
-      updateProgress(0, 'error', false);
-      return false;
-    } finally {
-      clearTimeout(loadTimeout);
-      setIsLoading(false);
     }
+    
+    // Fallback to single-thread
+    if (!loadSuccess) {
+      addLog?.('info', 'Load', 'Single-Thread FFmpeg yükleniyor...');
+      updateDebugInfo?.({ 
+        ffmpegLoadStatus: 'loading',
+        engineType: 'single-thread',
+      });
+      
+      try {
+        const ffmpegST = new FFmpeg();
+        
+        const loadLogHandler = ({ message }: { message: string }) => {
+          console.log('[FFmpeg ST]', message);
+        };
+        ffmpegST.on('log', loadLogHandler);
+        
+        // Load single-thread core from CDN
+        await ffmpegST.load({
+          coreURL: `${CORE_ST_CDN}/ffmpeg-core.js`,
+          wasmURL: `${CORE_ST_CDN}/ffmpeg-core.wasm`,
+        });
+        
+        ffmpegRef.current = ffmpegST;
+        logHandlerRef.current = loadLogHandler;
+        engineTypeRef.current = 'single-thread';
+        loadedEngineType = 'single-thread';
+        
+        updateDebugInfo?.({ 
+          coreJsLoadStatus: 'loaded', 
+          wasmLoadStatus: 'loaded',
+          ffmpegLoadStatus: 'loaded',
+          engineType: 'single-thread',
+        });
+        
+        addLog?.('success', 'Load', 'Single-Thread FFmpeg yüklendi');
+        loadSuccess = true;
+      } catch (stErr) {
+        const stErrorMessage = stErr instanceof Error ? stErr.message : String(stErr);
+        addLog?.('error', 'Load', `LOAD_FAILED: ${stErrorMessage}`);
+        
+        updateDebugInfo?.({ 
+          ffmpegLoadStatus: 'error',
+          errorCode: 'FFMPEG_LOAD_ERROR',
+          errorMessage: stErrorMessage,
+        });
+        
+        let errorMessage = 'Dönüştürücü yüklenemedi.';
+        let errorCode = 'FFMPEG_LOAD_ERROR';
+        
+        if (stErrorMessage.includes('fetch') || stErrorMessage.includes('network') || stErrorMessage.includes('Failed to') || stErrorMessage.includes('404')) {
+          errorMessage = 'FFmpeg dosyaları yüklenemedi. Lütfen internet bağlantınızı kontrol edin.';
+          errorCode = 'FFMPEG_FETCH_ERROR';
+        } else if (stErrorMessage.includes('WASM') || stErrorMessage.includes('wasm')) {
+          errorMessage = 'WebAssembly yüklenemedi. Lütfen sayfayı yenileyin.';
+          errorCode = 'WASM_LOAD_ERROR';
+        }
+        
+        const errorObj: ConversionError = {
+          code: errorCode,
+          message: errorMessage,
+          technical: `ffmpeg.load() başarısız\n${stErrorMessage}`,
+        };
+        setError(errorObj);
+        updateProgress(0, 'error', false);
+        clearTimeout(loadTimeout);
+        setIsLoading(false);
+        return false;
+      }
+    }
+
+    clearTimeout(loadTimeout);
+    setIsLoaded(true);
+    updateProgress(0, 'idle', false);
+    addLog?.('success', 'Load', `FFmpeg hazır (${loadedEngineType === 'multi-thread' ? 'Multi-Thread' : 'Single-Thread'})`);
+    return true;
   }, [isLoading, updateProgress, addLog, updateDebugInfo, normalizeError]);
 
   // Calculate maxrate based on source resolution and quality preset

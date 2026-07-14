@@ -50,6 +50,17 @@ export interface ConversionDebugInfo {
   ffmpegLoadStatus: 'idle' | 'loading' | 'loaded' | 'error';
   coreJsLoadStatus: 'idle' | 'loading' | 'loaded' | 'error';
   wasmLoadStatus: 'idle' | 'loading' | 'loaded' | 'error';
+  // Multi-threading support detection
+  sharedArrayBufferAvailable: boolean | null;
+  crossOriginIsolated: boolean | null;
+  // FFmpeg engine type
+  engineType: 'single-thread' | 'multi-thread' | null;
+  // Thread configuration
+  threadCount: number | null;
+  // Benchmark results
+  singleThreadEncodeTime: number | null;
+  multiThreadEncodeTime: number | null;
+  speedupRatio: number | null;
   mediaAnalysisStatus: 'idle' | 'analyzing' | 'completed' | 'error';
   encoderValidationStatus: 'idle' | 'validating' | 'completed' | 'error';
   encoderValidationResult: { h264: boolean; aac: boolean } | null;
@@ -369,6 +380,17 @@ const initialDebugInfo: ConversionDebugInfo = {
   ffmpegLoadStatus: 'idle',
   coreJsLoadStatus: 'idle',
   wasmLoadStatus: 'idle',
+  // Multi-threading support detection
+  sharedArrayBufferAvailable: null,
+  crossOriginIsolated: null,
+  // FFmpeg engine type
+  engineType: null,
+  // Thread configuration
+  threadCount: null,
+  // Benchmark results
+  singleThreadEncodeTime: null,
+  multiThreadEncodeTime: null,
+  speedupRatio: null,
   mediaAnalysisStatus: 'idle',
   encoderValidationStatus: 'idle',
   encoderValidationResult: null,
