@@ -275,6 +275,43 @@ export function DebugPanel({ debugInfo, isVisible, webCodecsDetection, selectedE
               value={debugInfo.fallbackReason || '-'} 
               status={debugInfo.fallbackReason ? 'warning' : 'completed'}
             />
+            {debugInfo.fallbackErrorMessage && (
+              <div className="mt-1">
+                <span className="text-slate-500 text-xs">Fallback Error:</span>
+                <div className="bg-red-50 text-red-700 p-1.5 rounded text-xs mt-0.5 break-all">
+                  {debugInfo.fallbackErrorMessage}
+                </div>
+              </div>
+            )}
+            {/* MT Loading Details */}
+            {(debugInfo.mtCdnAttempt || debugInfo.mtLocalAttempt) && (
+              <>
+                <div className="mt-2 pt-2 border-t border-slate-200">
+                  <span className="text-slate-500 text-xs font-medium">MT Loading:</span>
+                  <DebugRow 
+                    label="MT CDN" 
+                    value={debugInfo.mtCdnAttempt || '-'} 
+                    status={debugInfo.mtCdnAttempt === 'success' ? 'completed' : debugInfo.mtCdnAttempt === 'failed' ? 'error' : undefined}
+                  />
+                  {debugInfo.mtCdnError && (
+                    <div className="text-xs text-red-600 ml-2 break-all">CDN Error: {debugInfo.mtCdnError}</div>
+                  )}
+                  <DebugRow 
+                    label="MT Local" 
+                    value={debugInfo.mtLocalAttempt || '-'} 
+                    status={debugInfo.mtLocalAttempt === 'success' ? 'completed' : debugInfo.mtLocalAttempt === 'failed' ? 'error' : undefined}
+                  />
+                  {debugInfo.mtLocalError && (
+                    <div className="text-xs text-red-600 ml-2 break-all">Local Error: {debugInfo.mtLocalError}</div>
+                  )}
+                  {debugInfo.mtAssetLoadTimes && (
+                    <div className="text-xs text-slate-500 mt-1 ml-2">
+                      Asset times: core={debugInfo.mtAssetLoadTimes.core}ms, wasm={debugInfo.mtAssetLoadTimes.wasm}ms, worker={debugInfo.mtAssetLoadTimes.worker}ms
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
           </DebugSection>
 
           {/* Input Decoder Support */}

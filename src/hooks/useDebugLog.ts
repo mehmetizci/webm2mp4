@@ -57,8 +57,15 @@ export interface ConversionDebugInfo {
   engineType: 'single-thread' | 'multi-thread' | null;
   // Loading method (how FFmpeg was loaded)
   loadingMethod: 'Multi-Thread' | 'Single-Thread' | null;
-  // Fallback reason (why multi-thread was skipped or failed)
-  fallbackReason: 'timeout' | 'sab_unavailable' | 'cross_origin_isolated_false' | 'worker_failed' | 'network_error' | 'unknown' | null;
+  // Fallback reason (detailed)
+  fallbackReason: 'mt_cdn_failed' | 'mt_local_failed' | 'mt_init_timeout' | 'mt_init_failed' | 'sab_unavailable' | 'cross_origin_isolated_false' | 'unknown' | null;
+  fallbackErrorMessage: string | null;
+  // MT loading details
+  mtCdnAttempt: 'success' | 'failed' | null;
+  mtLocalAttempt: 'success' | 'failed' | null;
+  mtCdnError: string | null;
+  mtLocalError: string | null;
+  mtAssetLoadTimes: { core?: number; wasm?: number; worker?: number } | null;
   // Thread configuration
   threadCount: number | null;
   // Benchmark results
@@ -393,6 +400,13 @@ const initialDebugInfo: ConversionDebugInfo = {
   loadingMethod: null,
   // Fallback reason
   fallbackReason: null,
+  fallbackErrorMessage: null,
+  // MT loading details
+  mtCdnAttempt: null,
+  mtLocalAttempt: null,
+  mtCdnError: null,
+  mtLocalError: null,
+  mtAssetLoadTimes: null,
   // Thread configuration
   threadCount: null,
   // Benchmark results

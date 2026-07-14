@@ -66,6 +66,10 @@ function createTimeoutPromise(ms: number, message: string): Promise<never> {
 const CORE_MT_CDN = 'https://cdn.jsdelivr.net/npm/@ffmpeg/core-mt@0.12.10/dist/umd';
 const CORE_ST_CDN = 'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/umd';
 
+// Local fallback paths (same-origin)
+const CORE_MT_LOCAL = '/ffmpeg/core-mt';
+const CORE_ST_LOCAL = '/ffmpeg';
+
 // Loading step logging
 type LoadingStep = 
   | 'core_js'
@@ -98,6 +102,52 @@ function logLoadingStep(step: LoadingStep, details?: string): string {
 // Engine logging helper
 function logEngine(message: string): string {
   return `[Engine] ${message}`;
+}
+
+// MT loading result types
+interface MTLoadResult {
+  success: boolean;
+  errorMessage?: string;
+  cdnAttempted?: boolean;
+  cdnSuccess?: boolean;
+  localAttempted?: boolean;
+  localSuccess?: boolean;
+  assetLoadTimes?: {
+    core?: number;
+    wasm?: number;
+    worker?: number;
+  };
+}
+
+// Helper to load a single asset with timing
+async function loadAsset(
+  label: string,
+  url: string,
+  mimeType: string,
+  logCallback?: (msg: string) => void,
+): Promise<string> {
+  const startTime = performance.now();
+  
+  try {
+    logCallback?.(`[MT] ${label} indiriliyor: ${url}`);
+    const response = await fetch(url);
+    
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
+    
+    const blobData = await response.blob();
+    const resultUrl = URL.createObjectURL(blobData);
+    
+    const elapsed = Math.round(performance.now() - startTime);
+    logCallback?.(`[MT] ${label} hazir: ${elapsed}ms`);
+    
+    return resultUrl;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    logCallback?.(`[MT] ${label} hatasi: ${message}`);
+    throw new Error(`MT_ASSET_LOAD_FAILED:${label}:${message}`);
+  }
 }
 
 interface FFmpegLogStats {
@@ -489,55 +539,120 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
 
     // Try multi-thread first ONLY if fully supported
     let loadSuccess = false;
-    let fallbackReason: 'timeout' | 'sab_unavailable' | 'cross_origin_isolated_false' | 'worker_failed' | 'network_error' | 'unknown' | null = null;
+    let fallbackReason: 
+      | 'mt_cdn_failed'
+      | 'mt_local_failed'
+      | 'mt_init_timeout'
+      | 'mt_init_failed'
+      | 'sab_unavailable'
+      | 'cross_origin_isolated_false'
+      | 'unknown' 
+      | null = null;
+    let fallbackErrorMessage: string | null = null;
     
     if (sabSupport.crossOriginIsolated && sabSupport.available) {
       addLog?.('info', 'Load', logEngine(`Multi-thread eligible=true`));
-      addLog?.('info', 'Load', 'Multi-Thread FFmpeg yükleniyor...');
-      updateDebugInfo?.({ 
-        ffmpegLoadStatus: 'loading',
-        engineType: 'multi-thread',
-        loadingMethod: 'Multi-Thread',
-      });
       
-      let ffmpegMT: FFmpeg | null = null;
-      let loadLogHandler: ((data: { message: string }) => void) | null = null;
+      // Initialize debug tracking
+      let mtLoadResult: MTLoadResult = { success: false };
+      
+      // Try CDN first
+      addLog?.('info', 'Load', '[MT] CDN denemesi basliyor...');
+      let cdnCoreURL: string | null = null;
+      let cdnWasmURL: string | null = null;
+      let cdnWorkerURL: string | null = null;
+      let assetLoadTimes: { core?: number; wasm?: number; worker?: number } = {};
       
       try {
-        ffmpegMT = new FFmpeg();
+        const ffmpegMT = new FFmpeg();
         
-        loadLogHandler = ({ message }: { message: string }) => {
+        const loadLogHandler = ({ message }: { message: string }) => {
           console.log('[FFmpeg MT]', message);
-          if (message.includes('fetch') || message.includes('ffmpeg-core.js')) {
-            addLog?.('info', 'Load', logLoadingStep('core_js'));
-          } else if (message.includes('ffmpeg-core.wasm')) {
-            addLog?.('info', 'Load', logLoadingStep('wasm'));
-          } else if (message.includes('worker') || message.includes('ffmpeg-core.worker')) {
-            addLog?.('info', 'Load', logLoadingStep('worker'));
-          }
         };
         ffmpegMT.on('log', loadLogHandler);
         
-        // Create load promise with 10-second timeout
+        // Load assets with detailed timing using fetch
+        const coreStart = performance.now();
+        try {
+          const coreResponse = await fetch(`${CORE_MT_CDN}/ffmpeg-core.js`);
+          if (!coreResponse.ok) throw new Error(`HTTP ${coreResponse.status}`);
+          const coreData = await coreResponse.blob();
+          cdnCoreURL = URL.createObjectURL(coreData);
+          assetLoadTimes.core = Math.round(performance.now() - coreStart);
+          addLog?.('info', 'Load', `[MT] core.js hazir: ${assetLoadTimes.core}ms`);
+        } catch (coreErr) {
+          const msg = coreErr instanceof Error ? coreErr.message : String(coreErr);
+          addLog?.('error', 'Load', `[MT] core.js hatasi: ${msg}`);
+          throw new Error(`MT_ASSET_LOAD_FAILED:core.js:${msg}`);
+        }
+        
+        const wasmStart = performance.now();
+        try {
+          const wasmResponse = await fetch(`${CORE_MT_CDN}/ffmpeg-core.wasm`);
+          if (!wasmResponse.ok) throw new Error(`HTTP ${wasmResponse.status}`);
+          const wasmData = await wasmResponse.blob();
+          cdnWasmURL = URL.createObjectURL(wasmData);
+          assetLoadTimes.wasm = Math.round(performance.now() - wasmStart);
+          addLog?.('info', 'Load', `[MT] core.wasm hazir: ${assetLoadTimes.wasm}ms`);
+        } catch (wasmErr) {
+          const msg = wasmErr instanceof Error ? wasmErr.message : String(wasmErr);
+          addLog?.('error', 'Load', `[MT] core.wasm hatasi: ${msg}`);
+          // Clean up core URL
+          if (cdnCoreURL) URL.revokeObjectURL(cdnCoreURL);
+          throw new Error(`MT_ASSET_LOAD_FAILED:core.wasm:${msg}`);
+        }
+        
+        const workerStart = performance.now();
+        try {
+          const workerResponse = await fetch(`${CORE_MT_CDN}/ffmpeg-core.worker.js`);
+          if (!workerResponse.ok) throw new Error(`HTTP ${workerResponse.status}`);
+          const workerData = await workerResponse.blob();
+          cdnWorkerURL = URL.createObjectURL(workerData);
+          assetLoadTimes.worker = Math.round(performance.now() - workerStart);
+          addLog?.('info', 'Load', `[MT] core.worker.js hazir: ${assetLoadTimes.worker}ms`);
+        } catch (workerErr) {
+          const msg = workerErr instanceof Error ? workerErr.message : String(workerErr);
+          addLog?.('error', 'Load', `[MT] core.worker.js hatasi: ${msg}`);
+          // Clean up URLs
+          if (cdnCoreURL) URL.revokeObjectURL(cdnCoreURL);
+          if (cdnWasmURL) URL.revokeObjectURL(cdnWasmURL);
+          throw new Error(`MT_ASSET_LOAD_FAILED:core.worker.js:${msg}`);
+        }
+        
+        mtLoadResult = {
+          success: true,
+          cdnAttempted: true,
+          cdnSuccess: true,
+          assetLoadTimes,
+        };
+        addLog?.('info', 'Load', `[MT] CDN assets tamamlandi (${assetLoadTimes.core! + assetLoadTimes.wasm! + assetLoadTimes.worker!}ms)`);
+        
+        // Now load FFmpeg with the blob URLs - apply timeout only to initialization
+        addLog?.('info', 'Load', '[MT] FFmpeg baslatiliyor...');
+        
         const loadPromise = ffmpegMT.load({
-          coreURL: `${CORE_MT_CDN}/ffmpeg-core.js`,
-          wasmURL: `${CORE_MT_CDN}/ffmpeg-core.wasm`,
-          workerURL: `${CORE_MT_CDN}/ffmpeg-core.worker.js`,
+          coreURL: cdnCoreURL!,
+          wasmURL: cdnWasmURL!,
+          workerURL: cdnWorkerURL!,
         });
         
-        const timeoutPromise = createTimeoutPromise(10000, 'MT_LOAD_TIMEOUT');
+        const timeoutPromise = createTimeoutPromise(20000, 'MT_INIT_TIMEOUT');
         
-        // Race between load and timeout
+        // Race between FFmpeg init and timeout
         await Promise.race([loadPromise, timeoutPromise]);
         
-        // Check if this load is still the current one (race condition prevention)
+        // Check if this load is still valid
         if (loadId !== currentLoadIdRef.current) {
           addLog?.('info', 'Load', logEngine(`Stale load #${loadId}, ignoring`));
-          ffmpegMT?.terminate();
+          ffmpegMT.terminate();
+          // Clean up blob URLs
+          if (cdnCoreURL) URL.revokeObjectURL(cdnCoreURL);
+          if (cdnWasmURL) URL.revokeObjectURL(cdnWasmURL);
+          if (cdnWorkerURL) URL.revokeObjectURL(cdnWorkerURL);
           throw new Error('STALE_LOAD');
         }
         
-        // Load successful - set state atomically
+        // Success!
         ffmpegRef.current = ffmpegMT;
         logHandlerRef.current = loadLogHandler;
         engineTypeRef.current = 'multi-thread';
@@ -551,44 +666,119 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
           loadingMethod: 'Multi-Thread',
           threadCount: 2,
           fallbackReason: null,
+          mtCdnAttempt: 'success',
+          mtLocalAttempt: null,
+          mtAssetLoadTimes: assetLoadTimes,
         });
         
-        addLog?.('info', 'Load', logEngine(`Multi-thread load success`));
+        addLog?.('info', 'Load', logEngine(`MT CDN yükleme basarili`));
         addLog?.('info', 'Load', logEngine(`Actual engine: multi-thread`));
         addLog?.('info', 'Load', logEngine(`Thread count: 2`));
         addLog?.('success', 'Load', 'Multi-Thread FFmpeg yüklendi');
-        addLog?.('info', 'Load', logLoadingStep('complete'));
         loadSuccess = true;
+        
       } catch (mtErr) {
         const mtErrorMessage = mtErr instanceof Error ? mtErr.message : String(mtErr);
         
-        // Skip if this is a stale load result
+        // Clean up blob URLs if they exist
+        if (cdnCoreURL) URL.revokeObjectURL(cdnCoreURL);
+        if (cdnWasmURL) URL.revokeObjectURL(cdnWasmURL);
+        if (cdnWorkerURL) URL.revokeObjectURL(cdnWorkerURL);
+        
         if (mtErrorMessage === 'STALE_LOAD') {
-          loadSuccess = false;
+          return ffmpegRef.current !== null;
+        }
+        
+        // Determine fallback reason
+        if (mtErrorMessage.includes('MT_INIT_TIMEOUT')) {
+          fallbackReason = 'mt_init_timeout';
+          fallbackErrorMessage = mtErrorMessage;
+          addLog?.('warning', 'Load', logEngine(`MT initialization timeout (20sn)`));
+        } else if (mtErrorMessage.includes('MT_ASSET_LOAD_FAILED')) {
+          fallbackReason = 'mt_cdn_failed';
+          fallbackErrorMessage = mtErrorMessage;
+          addLog?.('warning', 'Load', logEngine(`MT CDN asset hatasi: ${mtErrorMessage}`));
         } else {
-          // Determine fallback reason
-          if (mtErrorMessage.includes('MT_LOAD_TIMEOUT') || mtErrorMessage.includes('timeout')) {
-            fallbackReason = 'timeout';
-            addLog?.('warning', 'Load', logEngine(`Multi-thread timeout (10sn)`));
-          } else if (mtErrorMessage.includes('fetch') || mtErrorMessage.includes('network') || mtErrorMessage.includes('Failed to')) {
-            fallbackReason = 'network_error';
-            addLog?.('warning', 'Load', logEngine(`Multi-thread network error`));
-          } else if (mtErrorMessage.includes('worker')) {
-            fallbackReason = 'worker_failed';
-            addLog?.('warning', 'Load', logEngine(`Multi-thread worker failed`));
-          } else {
-            fallbackReason = 'unknown';
-            addLog?.('warning', 'Load', logEngine(`Multi-thread load failed: ${mtErrorMessage}`));
+          fallbackReason = 'mt_init_failed';
+          fallbackErrorMessage = mtErrorMessage;
+          addLog?.('warning', 'Load', logEngine(`MT initialization hatasi: ${mtErrorMessage}`));
+        }
+        
+        // Try local fallback
+        addLog?.('info', 'Load', '[MT] Local fallback deneniyor...');
+        
+        let localCoreURL: string | null = null;
+        let localWasmURL: string | null = null;
+        let localWorkerURL: string | null = null;
+        
+        try {
+          const ffmpegMTLocal = new FFmpeg();
+          const loadLogHandler = ({ message }: { message: string }) => {
+            console.log('[FFmpeg MT Local]', message);
+          };
+          ffmpegMTLocal.on('log', loadLogHandler);
+          
+          // Load from local paths
+          localCoreURL = `${CORE_MT_LOCAL}/ffmpeg-core.js`;
+          localWasmURL = `${CORE_MT_LOCAL}/ffmpeg-core.wasm`;
+          localWorkerURL = `${CORE_MT_LOCAL}/ffmpeg-core.worker.js`;
+          
+          addLog?.('info', 'Load', `[MT] Local paths: ${localCoreURL}`);
+          
+          const loadPromise = ffmpegMTLocal.load({
+            coreURL: localCoreURL,
+            wasmURL: localWasmURL,
+            workerURL: localWorkerURL,
+          });
+          
+          const timeoutPromise = createTimeoutPromise(20000, 'MT_LOCAL_INIT_TIMEOUT');
+          
+          await Promise.race([loadPromise, timeoutPromise]);
+          
+          if (loadId !== currentLoadIdRef.current) {
+            ffmpegMTLocal.terminate();
+            throw new Error('STALE_LOAD');
           }
           
-          addLog?.('info', 'Load', logEngine(`Fallback reason: ${fallbackReason}`));
-          addLog?.('info', 'Load', 'Single-Thread FFmpeg deneniyor...');
+          // Local success!
+          ffmpegRef.current = ffmpegMTLocal;
+          logHandlerRef.current = loadLogHandler;
+          engineTypeRef.current = 'multi-thread';
+          threadCountRef.current = 2;
           
-          // Clean up failed MT instance
-          try {
-            ffmpegMT?.terminate();
-          } catch {
-            // Ignore cleanup errors
+          updateDebugInfo?.({ 
+            coreJsLoadStatus: 'loaded', 
+            wasmLoadStatus: 'loaded',
+            ffmpegLoadStatus: 'loaded',
+            engineType: 'multi-thread',
+            loadingMethod: 'Multi-Thread',
+            threadCount: 2,
+            fallbackReason: null,
+            mtCdnAttempt: 'failed',
+            mtLocalAttempt: 'success',
+            mtCdnError: fallbackErrorMessage,
+          });
+          
+          addLog?.('info', 'Load', logEngine(`MT Local yükleme basarili`));
+          addLog?.('info', 'Load', logEngine(`Actual engine: multi-thread`));
+          addLog?.('info', 'Load', logEngine(`Thread count: 2`));
+          addLog?.('success', 'Load', 'Multi-Thread FFmpeg (local) yüklendi');
+          loadSuccess = true;
+          
+        } catch (localErr) {
+          const localErrorMessage = localErr instanceof Error ? localErr.message : String(localErr);
+          
+          if (localErrorMessage !== 'STALE_LOAD') {
+            fallbackReason = 'mt_local_failed';
+            fallbackErrorMessage = localErrorMessage;
+            addLog?.('warning', 'Load', logEngine(`MT Local hatasi: ${localErrorMessage}`));
+            
+            updateDebugInfo?.({ 
+              mtCdnAttempt: 'failed',
+              mtLocalAttempt: 'failed',
+              mtCdnError: mtErrorMessage,
+              mtLocalError: localErrorMessage,
+            });
           }
         }
       }
@@ -601,11 +791,13 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
         fallbackReason = 'sab_unavailable';
         addLog?.('info', 'Load', logEngine(`Multi-thread eligible=false (SharedArrayBuffer unavailable)`));
       }
-      addLog?.('info', 'Load', 'Single-Thread FFmpeg kullanılıyor');
     }
     
     // Fallback to single-thread
     if (!loadSuccess) {
+      addLog?.('info', 'Load', logEngine(`Fallback reason: ${fallbackReason || 'unknown'}`));
+      addLog?.('info', 'Load', 'Single-Thread FFmpeg deneniyor...');
+      
       // Increment load ID to invalidate any pending loads
       currentLoadIdRef.current++;
       
@@ -615,6 +807,7 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
         loadingMethod: 'Single-Thread',
         threadCount: 1,
         fallbackReason,
+        fallbackErrorMessage,
       });
       
       let ffmpegST: FFmpeg | null = null;
@@ -626,23 +819,49 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
         
         loadLogHandler = ({ message }: { message: string }) => {
           console.log('[FFmpeg ST]', message);
-          if (message.includes('fetch') || message.includes('ffmpeg-core.js')) {
-            addLog?.('info', 'Load', logLoadingStep('core_js'));
-          } else if (message.includes('ffmpeg-core.wasm')) {
-            addLog?.('info', 'Load', logLoadingStep('wasm'));
-          }
         };
         ffmpegST.on('log', loadLogHandler);
         
-        // Single-thread load with 15-second timeout (slower but more reliable)
-        const loadPromise = ffmpegST.load({
-          coreURL: `${CORE_ST_CDN}/ffmpeg-core.js`,
-          wasmURL: `${CORE_ST_CDN}/ffmpeg-core.wasm`,
-        });
+        // Try local ST first
+        addLog?.('info', 'Load', '[ST] Local denemesi...');
         
-        const timeoutPromise = createTimeoutPromise(15000, 'ST_LOAD_TIMEOUT');
-        
-        await Promise.race([loadPromise, timeoutPromise]);
+        try {
+          const loadPromise = ffmpegST.load({
+            coreURL: `${CORE_ST_LOCAL}/ffmpeg-core.js`,
+            wasmURL: `${CORE_ST_LOCAL}/ffmpeg-core.wasm`,
+          });
+          
+          const timeoutPromise = createTimeoutPromise(15000, 'ST_LOCAL_TIMEOUT');
+          
+          await Promise.race([loadPromise, timeoutPromise]);
+          
+          if (stLoadId !== currentLoadIdRef.current) {
+            ffmpegST?.terminate();
+            throw new Error('STALE_LOAD');
+          }
+          
+          addLog?.('info', 'Load', '[ST] Local yükleme basarili');
+          
+        } catch {
+          addLog?.('info', 'Load', '[ST] CDN denemesi...');
+          
+          // Fallback to CDN
+          const loadPromise = ffmpegST!.load({
+            coreURL: `${CORE_ST_CDN}/ffmpeg-core.js`,
+            wasmURL: `${CORE_ST_CDN}/ffmpeg-core.wasm`,
+          });
+          
+          const timeoutPromise = createTimeoutPromise(60000, 'ST_CDN_TIMEOUT');
+          
+          await Promise.race([loadPromise, timeoutPromise]);
+          
+          if (stLoadId !== currentLoadIdRef.current) {
+            ffmpegST?.terminate();
+            throw new Error('STALE_LOAD');
+          }
+          
+          addLog?.('info', 'Load', '[ST] CDN yükleme basarili');
+        }
         
         // Check if this load is still valid
         if (stLoadId !== currentLoadIdRef.current) {
@@ -669,11 +888,11 @@ export function useFfmpeg(debugCallbacks?: DebugCallbacks): UseFfmpegReturn {
         addLog?.('info', 'Load', logEngine(`Thread count: 1`));
         addLog?.('success', 'Load', 'Single-Thread FFmpeg yüklendi');
         loadSuccess = true;
+        
       } catch (stErr) {
         const stErrorMessage = stErr instanceof Error ? stErr.message : String(stErr);
         
         if (stErrorMessage === 'STALE_LOAD') {
-          // This is expected - another load succeeded
           setIsLoading(false);
           return ffmpegRef.current !== null;
         }
