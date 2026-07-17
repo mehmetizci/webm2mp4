@@ -10,7 +10,7 @@ WebM videolarınızı tarayıcınızda MP4 formatına dönüştürün. Dosyalar 
 - 🎬 **FFmpeg WebAssembly** - Tarayıcıda profesyonel video dönüşümü
 - ⚡ **Hızlı Yükleme** - FFmpeg yalnızca dönüşüm başladığında yüklenir
 
-## Teknolojiler
+## Teknolojiler 
 
 - Next.js 16 (App Router)
 - TypeScript
